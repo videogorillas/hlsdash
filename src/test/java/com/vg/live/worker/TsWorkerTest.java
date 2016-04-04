@@ -55,6 +55,11 @@ public class TsWorkerTest {
             return false;
         }
 
+        /**
+         * https://en.wikipedia.org/wiki/Program-specific_information
+         * 
+         * @param pkt
+         */
         public void parsePSI(TSPkt pkt) {
             TSStream stream = this;
             if (pkt.pid == PAT_PID) {

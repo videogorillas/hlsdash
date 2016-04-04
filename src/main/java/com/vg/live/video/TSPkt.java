@@ -4,6 +4,12 @@ import static org.junit.Assert.assertEquals;
 
 import java.nio.ByteBuffer;
 
+/**
+ * https://en.wikipedia.org/wiki/MPEG_transport_stream
+ * 
+ * @author zhukov
+ *
+ */
 public class TSPkt {
     public static final int TSPKT_SIZE = 188;
     public int pid;

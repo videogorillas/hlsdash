@@ -2,6 +2,12 @@ package com.vg.gopro;
 
 import java.nio.ByteBuffer;
 
+/**
+ * https://en.wikipedia.org/wiki/Packetized_elementary_stream
+ * 
+ * @author zhukov
+ *
+ */
 public class PESPacket {
     public transient ByteBuffer payload;
     public int streamId;
