@@ -35,10 +35,6 @@ import rx.Observable;
 
 public class TsWorkerTest {
 
-    public static final String UNKNOWN_PES = "unknown";
-    public static final String VIDEO_PES = "video";
-    public static final String AUDIO_PES = "audio";
-
     public static class TSStream {
         public PATSection pat;
         public PMTSection pmt;

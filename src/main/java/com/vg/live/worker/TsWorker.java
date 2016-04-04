@@ -29,6 +29,10 @@ import rx.functions.Action1;
 import rx.observables.GroupedObservable;
 
 public class TsWorker {
+    public static final String UNKNOWN_PES = "unknown";
+    public static final String VIDEO_PES = "video";
+    public static final String AUDIO_PES = "audio";
+
     public static Observable<TSPkt> tsPackets(Observable<ByteBuffer> tsBufs, final long initialPosition) {
         MutableLong streamPosition = new MutableLong(initialPosition);
         Observable<TSPkt> tsPackets = tsBufs.concatMap(ts -> {
@@ -281,11 +285,11 @@ public class TsWorker {
         Observable<PESPacket> pesPackets = pesPackets(tsPacketLists, log);
         Observable<GroupedObservable<String, PESPacket>> audioVideoPes = pesPackets.groupBy(pes -> {
             if (isAudio(pes.streamId)) {
-                return TsWorkerTest.AUDIO_PES;
+                return AUDIO_PES;
             } else if (isVideo(pes.streamId)) {
-                return TsWorkerTest.VIDEO_PES;
+                return VIDEO_PES;
             } else {
-                return TsWorkerTest.UNKNOWN_PES;
+                return UNKNOWN_PES;
             }
         });
     
@@ -293,7 +297,7 @@ public class TsWorker {
             String pestype = _pes.getKey();
             Observable<PESPacket> pes = setPESPacketDuration(_pes);
     
-            if (TsWorkerTest.AUDIO_PES.equals(pestype)) {
+            if (AUDIO_PES.equals(pestype)) {
                 Observable<AVFrame> aframes = audio(pes);
                 aframes = adtstoasc(aframes);
                 aframes = aframes.doOnNext(frame -> {
@@ -302,7 +306,7 @@ public class TsWorker {
                     }
                 });
                 return aframes;
-            } else if (TsWorkerTest.VIDEO_PES.equals(pestype)) {
+            } else if (VIDEO_PES.equals(pestype)) {
                 return video(pes).doOnNext(populateSps());
             }
             return Observable.empty();
