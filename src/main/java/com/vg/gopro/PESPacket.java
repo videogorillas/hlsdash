@@ -1,6 +1,9 @@
 package com.vg.gopro;
 
-import java.nio.ByteBuffer;
+import org.stjs.javascript.Global;
+
+import js.lang.System;
+import js.nio.ByteBuffer;
 
 /**
  * https://en.wikipedia.org/wiki/Packetized_elementary_stream
@@ -9,7 +12,7 @@ import java.nio.ByteBuffer;
  *
  */
 public class PESPacket {
-    public transient ByteBuffer payload;
+    public transient ByteBuffer _payload;
     public int streamId;
     public long streamOffset;
     public int streamSize;
@@ -23,9 +26,9 @@ public class PESPacket {
     public static final int VIDEO_MAX = 0x1EF;
 
     public ByteBuffer payload() {
-        payload.limit(payloadOffset + payloadSize);
-        payload.position(payloadOffset);
-        return payload;
+        _payload.setLimit(payloadOffset + payloadSize);
+        _payload.setPosition(payloadOffset);
+        return _payload;
     }
 
     //TODO: move this method to a utility class
@@ -39,65 +42,13 @@ public class PESPacket {
         return streamId >= 0xbf && streamId <= 0xdf;
     }
 
-    static void mpeg1Pes(int b0, int len, int streamId, ByteBuffer is) {
-        int c = b0;
-        while (c == 0xff) {
-            c = is.get() & 0xff;
-        }
-
-        if ((c & 0xc0) == 0x40) {
-            is.get();
-            c = is.get() & 0xff;
-        }
-        long pts = -1, dts = -1;
-        if ((c & 0xf0) == 0x20) {
-            pts = readTs(is, c);
-        } else if ((c & 0xf0) == 0x30) {
-            pts = readTs(is, c);
-            dts = readTs(is);
-        } else {
-            if (c != 0x0f)
-                throw new RuntimeException("Invalid data");
-        }
-    }
-
-    static void mpeg2Pes(int b0, int len, int streamId, ByteBuffer is) {
-        int flags1 = b0;
-        int flags2 = is.get() & 0xff;
-        int header_len = is.get() & 0xff;
-
-        long pts = -1, dts = -1;
-        if ((flags2 & 0xc0) == 0x80) {
-            pts = readTs(is);
-            PESPacket.skip(is, header_len - 5);
-        } else if ((flags2 & 0xc0) == 0xc0) {
-            pts = readTs(is);
-            dts = readTs(is);
-            PESPacket.skip(is, header_len - 10);
-        } else {
-            PESPacket.skip(is, header_len);
-        }
-    }
-
-    static void skipPESHeader(ByteBuffer iss) {
-        int streamId = iss.getInt() & 0xff;
-        int len = iss.getShort();
-        if (streamId != 0xbf) {
-            int b0 = iss.get() & 0xff;
-            if ((b0 & 0xc0) == 0x80)
-                PESPacket.mpeg2Pes(b0, len, streamId, iss);
-            else
-                PESPacket.mpeg1Pes(b0, len, streamId, iss);
-        }
-    }
-
     public static final boolean psMarker(int marker) {
         return marker >= PESPacket.PRIVATE_1 && marker <= PESPacket.VIDEO_MAX;
     }
 
     public static int nextPsMarkerPosition(ByteBuffer buf) {
         for (int i = buf.position() + 4; i < buf.limit() - 4; i++) {
-            int int1 = buf.getInt(i);
+            int int1 = buf.getIntAt(i);
             if (PESPacket.psMarker(int1)) {
                 return i;
             }
@@ -106,7 +57,7 @@ public class PESPacket {
     }
 
     public PESPacket(ByteBuffer data, long pts, int streamId, int length, long pos, long dts) {
-        this.payload = data;
+        this._payload = data;
         this.pts = pts;
         this.streamId = streamId;
         this.payloadSize = length;
@@ -135,22 +86,9 @@ public class PESPacket {
         return new PESPacket(null, -1, streamId, -1, pos, -1);
     }
 
-    public static PESPacket _readPESHeader(ByteBuffer iss, long pos) {
-        int streamId = iss.getInt() & 0xff;
-        int len = iss.getShort();
-        if (streamId != 0xbf) {
-            int b0 = iss.get() & 0xff;
-            if ((b0 & 0xc0) == 0x80)
-                return PESPacket.mpeg2Pes(b0, len, streamId, iss, pos);
-            else
-                return PESPacket.mpeg1Pes(b0, len, streamId, iss, pos);
-        }
-        return new PESPacket(null, -1, streamId, len, pos, -1);
-    }
-
     public static int skip(ByteBuffer buffer, int count) {
         int toSkip = Math.min(buffer.remaining(), count);
-        buffer.position(buffer.position() + toSkip);
+        buffer.setPosition(buffer.position() + toSkip);
         return toSkip;
     }
 
@@ -174,8 +112,13 @@ public class PESPacket {
     }
 
     public static long readTs(ByteBuffer is) {
-        return (((long) is.get() & 0x0e) << 29) | ((is.get() & 0xff) << 22) | (((is.get() & 0xff) >> 1) << 15)
-                | ((is.get() & 0xff) << 7) | ((is.get() & 0xff) >> 1);
+        int b0 = is.get() & 0x0e;
+        int b1 = is.get() & 0xff;
+        int b2 = is.get() & 0xff;
+        int b3 = is.get() & 0xff;
+        int b4 = is.get() & 0xff;
+        long pts = (536870912 * b0) + (b1 << 22) + ((b2 >> 1) << 15) + (b3 << 7) + (b4 >> 1);
+        return pts;
     }
 
     public static PESPacket mpeg1Pes(int b0, int len, int streamId, ByteBuffer is, long pos) {
@@ -190,9 +133,9 @@ public class PESPacket {
         }
         long pts = -1, dts = -1;
         if ((c & 0xf0) == 0x20) {
-            pts = PESPacket.readTs(is, c);
+            pts = PESPacket.readTs1(is, c);
         } else if ((c & 0xf0) == 0x30) {
-            pts = PESPacket.readTs(is, c);
+            pts = PESPacket.readTs1(is, c);
             dts = readTs(is);
         } else {
             if (c != 0x0f)
@@ -202,7 +145,7 @@ public class PESPacket {
         return new PESPacket(null, pts, streamId, len, pos, dts);
     }
 
-    public static long readTs(ByteBuffer is, int c) {
+    public static long readTs1(ByteBuffer is, int c) {
         return (((long) c & 0x0e) << 29) | ((is.get() & 0xff) << 22) | (((is.get() & 0xff) >> 1) << 15)
                 | ((is.get() & 0xff) << 7) | ((is.get() & 0xff) >> 1);
     }

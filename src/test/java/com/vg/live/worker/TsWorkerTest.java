@@ -2,23 +2,30 @@ package com.vg.live.worker;
 
 import static com.vg.live.video.TSPkt.PAT_PID;
 import static com.vg.util.ADTSHeader.decoderSpecific;
-import static java.util.Arrays.asList;
-import static org.jcodec.common.NIOUtils.writableFileChannel;
+import static js.util.Arrays.asList;
+import static org.jcodec.codecs.h264.mp4.AvcCBox.createAvcCBox;
+import static org.jcodec.codecs.mpeg4.mp4.EsdsBox.createEsdsBox;
+import static org.jcodec.common.io.NIOUtils.writableFileChannel;
+import static org.jcodec.containers.mp4.MP4Packet.createMP4Packet;
+import static org.stjs.javascript.Global.console;
+import static org.stjs.javascript.JSObjectAdapter.$get;
 
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.util.List;
+import js.io.File;
+import js.io.FileNotFoundException;
+import js.io.IOException;
+import js.lang.System;
+import js.nio.ByteBuffer;
+import js.util.List;
 
 import org.jcodec.codecs.h264.H264Utils;
 import org.jcodec.codecs.h264.io.model.SeqParameterSet;
 import org.jcodec.codecs.h264.mp4.AvcCBox;
 import org.jcodec.codecs.mpeg4.mp4.EsdsBox;
-import org.jcodec.common.FileChannelWrapper;
-import org.jcodec.common.NIOUtils;
+import org.jcodec.common.io.FileChannelWrapper;
+import org.jcodec.common.io.NIOUtils;
 import org.jcodec.containers.mp4.MP4Packet;
 import org.jcodec.containers.mp4.TrackType;
+import org.jcodec.containers.mp4.boxes.Box;
 import org.jcodec.containers.mp4.boxes.SampleEntry;
 import org.jcodec.containers.mp4.muxer.AbstractMP4MuxerTrack;
 import org.jcodec.containers.mp4.muxer.FramesMP4MuxerTrack;
@@ -26,12 +33,13 @@ import org.jcodec.containers.mp4.muxer.MP4Muxer;
 import org.jcodec.containers.mps.psi.PATSection;
 import org.jcodec.containers.mps.psi.PMTSection;
 import org.junit.Test;
+import org.stjs.javascript.Global;
+import org.stjs.javascript.JSObjectAdapter;
 
+import com.vg.js.bridge.Rx.Observable;
 import com.vg.live.video.AVFrame;
 import com.vg.live.video.TSPkt;
 import com.vg.util.ADTSHeader;
-
-import rx.Observable;
 
 public class TsWorkerTest {
 
@@ -63,10 +71,10 @@ public class TsWorkerTest {
                 if (pkt.payloadStart) {
                     int pointerField = payload.get() & 0xff;
                     if (pointerField != 0) {
-                        payload.position(payload.position() + pointerField);
+                        payload.setPosition(payload.position() + pointerField);
                     }
                 }
-                PATSection pat = PATSection.parse(payload);
+                PATSection pat = PATSection.parsePAT(payload);
                 stream.pat = pat;
                 stream.pmtPIDs = stream.pat.getPrograms().values();
             }
@@ -75,19 +83,34 @@ public class TsWorkerTest {
                 if (pkt.payloadStart) {
                     int pointerField = payload.get() & 0xff;
                     if (pointerField != 0) {
-                        payload.position(payload.position() + pointerField);
+                        payload.setPosition(payload.position() + pointerField);
                     }
                 }
-                PMTSection pmt = PMTSection.parse(payload);
+                PMTSection pmt = PMTSection.parsePMT(payload);
                 stream.pmt = pmt;
             }
         }
     }
 
     static MP4Packet mp4(AVFrame f, long startPts) {
-        MP4Packet pkt = new MP4Packet(f.data(), f.pts - startPts, 90000, Math.max(0, f.duration), 0, f.isIFrame(), null,
-                f.pts - startPts, 0);
+        MP4Packet pkt = createMP4Packet(f.data(), f.pts - startPts, 90000, Math.max(0, f.duration), 0, f
+                .isIFrame(), null, 0, f.pts - startPts, 0);
         return pkt;
+    }
+
+    public void testPipeline1() throws Exception {
+        File file2 = new File("tmp/out.mp4");
+        FileChannelWrapper w = NIOUtils.writableChannel(file2);
+        MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(w);
+
+        FramesMP4MuxerTrack vTrack = muxer.addTrack(TrackType.VIDEO, 90000);
+
+        AvcCBox avcc = createAvcCBox(0, 0, 0, 4, asList(ByteBuffer.allocate(42)), asList(ByteBuffer.allocate(4)));
+        SampleEntry se = H264Utils.createMOVSampleEntryFromAvcC(avcc);
+        vTrack.addSampleEntry(se);
+        muxer.writeHeader();
+        w.close();
+
     }
 
     @Test
@@ -111,9 +134,10 @@ public class TsWorkerTest {
         });
 
         File file2 = new File(outputDir, "out.mp4");
-        FileChannelWrapper w = writableFileChannel(file2);
-        MP4Muxer muxer = new MP4Muxer(w);
-        Observable<MP4Muxer> reduce = frames.reduce(muxer, (m, f) -> {
+        FileChannelWrapper w = NIOUtils.writableChannel(file2);
+        MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(w);
+        Observable<MP4Muxer> reduce = frames.reduce((m, f) -> {
+            console.log("frame", f.toString());
             try {
                 if (f.isVideo()) {
                     FramesMP4MuxerTrack vTrack = (FramesMP4MuxerTrack) muxer.getVideoTrack();
@@ -131,24 +155,34 @@ public class TsWorkerTest {
                     aTrack.addFrame(mp4(f, stream.startPts));
                 }
             } catch (Exception e) {
+                console.error(e);
                 throw new RuntimeException(e);
             }
             return m;
-        });
+        }, muxer);
         reduce = reduce.doOnNext(m -> {
             try {
                 m.writeHeader();
                 w.close();
             } catch (Exception e) {
+                console.log("e", e);
+                console.log("stack", $get(e, "stack"));
                 throw new RuntimeException(e);
             }
         });
-        reduce.toBlocking().subscribe();
+        reduce.subscribe(x -> {
+            System.out.println(x);
+        }, err -> {
+            console.log("err", err);
+            console.log("stack", JSObjectAdapter.$get(err, "stack"));
+        }, () ->{
+            console.log("done");
+        });
 
     }
 
     private ByteBuffer readFileToByteBuffer(File file) throws FileNotFoundException, IOException {
-        FileChannelWrapper channel = NIOUtils.readableFileChannel(file);
+        FileChannelWrapper channel = NIOUtils.readableChannel(file);
         int size = (int) channel.size();
         ByteBuffer buf = ByteBuffer.allocate(size);
         while (buf.hasRemaining()) {
@@ -162,8 +196,10 @@ public class TsWorkerTest {
         dir.mkdirs();
         File[] listFiles = dir.listFiles();
         if (listFiles != null) {
-            for (File f : listFiles) {
-                f.delete();
+            for (int i = 0; i < listFiles.length; i++) {
+                File f = listFiles[i];
+                System.out.println("rm " + f);
+                f.$delete();
             }
         }
         return dir;
@@ -178,19 +214,19 @@ public class TsWorkerTest {
 
     private FramesMP4MuxerTrack addAudioTrack(MP4Muxer muxer, AVFrame audioFrame) {
         ADTSHeader hdr = audioFrame.adtsHeader;
-        EsdsBox esds = new EsdsBox(decoderSpecific(hdr), (hdr.getObjectType() + 1) << 5, 0, 256 * 1024, 128 * 1024, 2);
-        FramesMP4MuxerTrack aTrack = muxer
-                .addCompressedAudioTrack("mp4a", 90000, hdr.getChanConfig(), hdr.getSampleRate(), 0, esds);
+        EsdsBox esds = createEsdsBox(decoderSpecific(hdr), (hdr.getObjectType() + 1) << 5, 0, 256 * 1024, 128
+                * 1024, 2);
+        FramesMP4MuxerTrack aTrack = muxer.addCompressedAudioTrack("mp4a", 90000, hdr.getChanConfig(), hdr
+                .getSampleRate(), 0, new Box[] { esds });
         return aTrack;
     }
 
     private SampleEntry videoSampleEntry(AVFrame videoFrame) {
-        SeqParameterSet sps = videoFrame.getSps();
+        SeqParameterSet sps = videoFrame.sps;
         int nalLenSize = 4;
-        AvcCBox avcC = new AvcCBox(sps.profile_idc, 0, sps.level_idc, nalLenSize, asList(videoFrame.spsBuf),
-                asList(videoFrame.ppsBuf));
+        AvcCBox avcC = createAvcCBox(sps.profile_idc, 0, sps.level_idc, nalLenSize, asList(videoFrame.spsBuf), asList(videoFrame.ppsBuf));
 
-        SampleEntry sampleEntry = H264Utils.createMOVSampleEntry(avcC);
+        SampleEntry sampleEntry = H264Utils.createMOVSampleEntryFromAvcC(avcC);
         return sampleEntry;
     }
 

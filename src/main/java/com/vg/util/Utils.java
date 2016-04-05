@@ -1,6 +1,6 @@
 package com.vg.util;
 
-import java.util.List;
+import js.util.List;
 
 public class Utils {
     public static <T> T lastElement(List<T> list) {

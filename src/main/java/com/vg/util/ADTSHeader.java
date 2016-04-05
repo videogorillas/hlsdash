@@ -1,6 +1,6 @@
 package com.vg.util;
 
-import java.nio.ByteBuffer;
+import js.nio.ByteBuffer;
 
 import org.jcodec.common.io.BitReader;
 import org.jcodec.common.io.BitWriter;
@@ -27,7 +27,7 @@ public class ADTSHeader {
 
     public static ADTSHeader read(ByteBuffer data) {
         ByteBuffer dup = data.duplicate();
-        BitReader br = new BitReader(dup);
+        BitReader br = BitReader.createBitReader(dup);
         // int size, rdb, ch, sr;
         // int aot, crc_abs;
 
@@ -59,7 +59,7 @@ public class ADTSHeader {
         hdr.rdb = br.readNBit(2); /* number_of_raw_data_blocks_in_frame */
         br.stop();
 
-        data.position(dup.position());
+        data.setPosition(dup.position());
 
         return hdr;
     }

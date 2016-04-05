@@ -1,6 +1,6 @@
 package com.vg.util;
 
-import java.nio.ByteBuffer;
+import js.nio.ByteBuffer;
 
 public class BufferUtil {
     /**
@@ -12,8 +12,8 @@ public class BufferUtil {
      */
     public static void clear(ByteBuffer buffer) {
         if (buffer != null) {
-            buffer.position(0);
-            buffer.limit(0);
+            buffer.setPosition(0);
+            buffer.setLimit(0);
         }
     }
 
@@ -28,20 +28,20 @@ public class BufferUtil {
      */
     public static ByteBuffer allocate(int capacity) {
         ByteBuffer buf = ByteBuffer.allocate(capacity);
-        buf.limit(0);
+        buf.setLimit(0);
         return buf;
     }
 
     public static ByteBuffer allocateDirect(int capacity) {
         ByteBuffer buf = ByteBuffer.allocateDirect(capacity);
-        buf.limit(0);
+        buf.setLimit(0);
         return buf;
     }
 
     public static ByteBuffer copy(ByteBuffer buf) {
         buf.mark();
         ByteBuffer allocate = ByteBuffer.allocate(buf.remaining());
-        allocate.put(buf);
+        allocate.putBuf(buf);
         allocate.clear();
         buf.reset();
         return allocate;

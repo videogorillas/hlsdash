@@ -18,31 +18,24 @@
 
 package com.vg.util;
 
-import java.nio.ByteBuffer;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
+import js.nio.ByteBuffer;
+import js.util.Queue;
+import js.util.concurrent.ConcurrentHashMap;
+import js.util.concurrent.ConcurrentLinkedQueue;
+import js.util.concurrent.ConcurrentMap;
 
-public class MappedByteBufferPool
-{
-    private final ConcurrentMap<Integer, Queue<ByteBuffer>> directBuffers = new ConcurrentHashMap<>();
-    private final ConcurrentMap<Integer, Queue<ByteBuffer>> heapBuffers = new ConcurrentHashMap<>();
+public class MappedByteBufferPool {
+    private final ConcurrentMap<Integer, Queue<ByteBuffer>> directBuffers;
+    private final ConcurrentMap<Integer, Queue<ByteBuffer>> heapBuffers;
     private final int factor;
 
-    public MappedByteBufferPool()
-    {
-        this(1024);
-    }
-
-    public MappedByteBufferPool(int factor)
-    {
+    public MappedByteBufferPool(int factor) {
         this.factor = factor;
+        this.directBuffers = new ConcurrentHashMap<>();
+        this.heapBuffers = new ConcurrentHashMap<>();
     }
 
-    public ByteBuffer acquire(int size, boolean direct)
-    {
+    public ByteBuffer acquire(int size, boolean direct) {
         int bucket = bucketFor(size);
         ConcurrentMap<Integer, Queue<ByteBuffer>> buffers = buffersFor(direct);
 
@@ -51,37 +44,35 @@ public class MappedByteBufferPool
         if (byteBuffers != null)
             result = byteBuffers.poll();
 
-        if (result == null)
-        {
+        if (result == null) {
             int capacity = bucket * factor;
             result = newByteBuffer(capacity, direct);
         }
 
         BufferUtil.clear(result);
+        if(result.capacity() < size) {
+            throw new RuntimeException("FramePool BUG");
+        }
         return result;
     }
 
-    protected ByteBuffer newByteBuffer(int capacity, boolean direct)
-    {
-        return direct ? BufferUtil.allocateDirect(capacity)
-                      : BufferUtil.allocate(capacity);
+    protected ByteBuffer newByteBuffer(int capacity, boolean direct) {
+        return direct ? BufferUtil.allocateDirect(capacity) : BufferUtil.allocate(capacity);
     }
 
-    public void release(ByteBuffer buffer)
-    {
+    public void release(ByteBuffer buffer) {
         if (buffer == null)
             return; // nothing to do
-        
+
         // validate that this buffer is from this pool
-        assert((buffer.capacity() % factor) == 0);
-        
+//        assert ((buffer.capacity() % factor) == 0);
+
         int bucket = bucketFor(buffer.capacity());
         ConcurrentMap<Integer, Queue<ByteBuffer>> buffers = buffersFor(buffer.isDirect());
 
         // Avoid to create a new queue every time, just to be discarded immediately
         Queue<ByteBuffer> byteBuffers = buffers.get(bucket);
-        if (byteBuffers == null)
-        {
+        if (byteBuffers == null) {
             byteBuffers = new ConcurrentLinkedQueue<>();
             Queue<ByteBuffer> existing = buffers.putIfAbsent(bucket, byteBuffers);
             if (existing != null)
@@ -92,14 +83,12 @@ public class MappedByteBufferPool
         byteBuffers.offer(buffer);
     }
 
-    public void clear()
-    {
+    public void clear() {
         directBuffers.clear();
         heapBuffers.clear();
     }
 
-    private int bucketFor(int size)
-    {
+    private int bucketFor(int size) {
         int bucket = size / factor;
         if (size % factor > 0)
             ++bucket;
@@ -107,24 +96,8 @@ public class MappedByteBufferPool
     }
 
     // Package local for testing
-    ConcurrentMap<Integer, Queue<ByteBuffer>> buffersFor(boolean direct)
-    {
+    ConcurrentMap<Integer, Queue<ByteBuffer>> buffersFor(boolean direct) {
         return direct ? directBuffers : heapBuffers;
     }
 
-    public static class Tagged extends MappedByteBufferPool
-    {
-        private final AtomicInteger tag = new AtomicInteger();
-
-        @Override
-        protected ByteBuffer newByteBuffer(int capacity, boolean direct)
-        {
-            ByteBuffer buffer = super.newByteBuffer(capacity + 4, direct);
-            buffer.limit(buffer.capacity());
-            buffer.putInt(tag.incrementAndGet());
-            ByteBuffer slice = buffer.slice();
-            BufferUtil.clear(slice);
-            return slice;
-        }
-    }
 }

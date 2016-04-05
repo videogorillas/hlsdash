@@ -1,16 +1,16 @@
 package com.vg.live.worker;
 
-import java.nio.ByteBuffer;
+import js.nio.ByteBuffer;
 
 import com.vg.util.MappedByteBufferPool;
 
 public class FramePool {
-    static MappedByteBufferPool pool = new MappedByteBufferPool();
+    static MappedByteBufferPool pool = new MappedByteBufferPool(1024);
 
     public static ByteBuffer acquire(int size) {
         ByteBuffer acquire = pool.acquire(size, false);
-        acquire.position(0);
-        acquire.limit(size);
+        acquire.setPosition(0);
+        acquire.setLimit(size);
         return acquire;
     }
 
@@ -20,7 +20,7 @@ public class FramePool {
 
     public static ByteBuffer copy(ByteBuffer payload) {
         ByteBuffer acquire = FramePool.acquire(payload.remaining());
-        acquire.put(payload);
+        acquire.putBuf(payload);
         return acquire;
     }
 

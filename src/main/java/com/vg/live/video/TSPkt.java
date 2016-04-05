@@ -1,8 +1,7 @@
 package com.vg.live.video;
 
-import static org.junit.Assert.assertEquals;
-
-import java.nio.ByteBuffer;
+import js.nio.ByteBuffer;
+import js.lang.System;
 
 /**
  * https://en.wikipedia.org/wiki/MPEG_transport_stream
@@ -17,7 +16,7 @@ public class TSPkt {
     public int dataOffset;
     int payloadPos;
     public int payloadLength;
-    transient ByteBuffer data;
+    transient ByteBuffer _data;
     public long streamOffset;
     private int header;
     public static final int Continuity_counter = 0xf;
@@ -38,22 +37,16 @@ public class TSPkt {
     public TSPkt() {
     }
 
-    public TSPkt(int pid, boolean payloadStart, long streamOffset) {
-        this.pid = pid;
-        this.payloadStart = payloadStart;
-        this.streamOffset = streamOffset;
-    }
-
     public ByteBuffer data() {
-        data.limit(dataOffset + TSPkt.TSPKT_SIZE);
-        data.position(dataOffset);
-        return data;
+        _data.setLimit(dataOffset + TSPkt.TSPKT_SIZE);
+        _data.setPosition(dataOffset);
+        return _data;
     }
 
     public ByteBuffer payload() {
-        data.limit(payloadPos + payloadLength);
-        data.position(payloadPos);
-        return data;
+        _data.setLimit(payloadPos + payloadLength);
+        _data.setPosition(payloadPos);
+        return _data;
     }
 
     @Override
@@ -66,7 +59,9 @@ public class TSPkt {
     public static void parsePacket(TSPkt pkt, ByteBuffer buffer) {
         int header = buffer.getInt();
         int marker = (header & Sync_byte) >> 24;
-        assertEquals(TS_START_CODE, marker);
+        if (TS_START_CODE != marker) {
+            throw new RuntimeException("not ts packet");
+        }
         boolean error = (header & Transport_Error_Indicator) != 0;
         boolean payloadStart = (header & Payload_Unit_Start_Indicator) != 0;
         boolean priority = (header & Transport_Priority) != 0;
@@ -77,10 +72,9 @@ public class TSPkt {
         int continuity = header & Continuity_counter;
 
         if (adaptation) {
-            //            System.out.println("adaptation");
             int taken = 0;
             taken = (buffer.get() & 0xff) + 1;
-            buffer.position(Math.min(buffer.limit(), buffer.position() + taken - 1));
+            buffer.setPosition(Math.min(buffer.limit(), buffer.position() + taken - 1));
         }
         if (!hasPayload) {
             System.out.println("no payload");
@@ -94,7 +88,7 @@ public class TSPkt {
         pkt.payloadStart = payloadStart;
         pkt.payloadPos = buffer.position();
         pkt.payloadLength = buffer.remaining();
-        pkt.data = buffer; //((b0 & 0x10) != 0) ? buffer : null;
+        pkt._data = buffer; //((b0 & 0x10) != 0) ? buffer : null;
     }
 
     public int getContinuityCounter() {

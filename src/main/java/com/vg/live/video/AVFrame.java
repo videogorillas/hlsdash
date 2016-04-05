@@ -1,6 +1,6 @@
 package com.vg.live.video;
 
-import java.nio.ByteBuffer;
+import js.nio.ByteBuffer;
 
 import org.jcodec.codecs.h264.io.model.NALUnitType;
 import org.jcodec.codecs.h264.io.model.PictureParameterSet;
@@ -17,22 +17,14 @@ public class AVFrame {
     public final long streamOffset;
     public final int streamSize;
     public final NALUnitType nalType;
-    public transient ByteBuffer data;
+    public transient ByteBuffer _data;
     public int dataSize;
     public int dataOffset;
-    private transient SeqParameterSet sps;
+    public transient SeqParameterSet sps;
     public transient PictureParameterSet pps;
     public transient ADTSHeader adtsHeader;
     public transient ByteBuffer spsBuf;
     public transient ByteBuffer ppsBuf;
-
-    public AVFrame(String type, long streamOffset, int size) {
-        this.type = type;
-        this.streamOffset = streamOffset;
-        this.dataSize = size;
-        this.streamSize = size;
-        this.nalType = null;
-    }
 
     public AVFrame(String type, long streamOffset, int size, NALUnitType nalType) {
         this.type = type;
@@ -54,7 +46,7 @@ public class AVFrame {
     }
 
     public static AVFrame audio(long offset, int size) {
-        return new AVFrame("A", offset, size);
+        return new AVFrame("A", offset, size, null);
     }
 
     public static AVFrame video(long offset, int size, NALUnitType nalType) {
@@ -66,25 +58,13 @@ public class AVFrame {
     }
 
     public ByteBuffer data() {
-        data.limit(dataOffset + dataSize);
-        data.position(dataOffset);
-        return data;
+        _data.setLimit(dataOffset + dataSize);
+        _data.setPosition(dataOffset);
+        return _data;
     }
 
     public boolean isAudio() {
         return !isVideo();
-    }
-
-    public SeqParameterSet getSps() {
-        return sps;
-    }
-
-    public PictureParameterSet getPps() {
-        return pps;
-    }
-
-    public void setSps(SeqParameterSet sps) {
-        this.sps = sps;
     }
 
 }
