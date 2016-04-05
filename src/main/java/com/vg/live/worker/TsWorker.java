@@ -108,27 +108,6 @@ public class TsWorker {
         return pesPackets;
     }
 
-    public static Action1<AVFrame> populateSps() {
-        return new Action1<AVFrame>() {
-            AVFrame prevFrame = null;
-
-            @Override
-            public void call(AVFrame curFrame) {
-                if (curFrame.isVideo()) {
-                    if (prevFrame != null && curFrame.getSps() == null) {
-                        curFrame.setSps(prevFrame.getSps());
-                        curFrame.spsBuf = prevFrame.spsBuf;
-                    }
-                    if (prevFrame != null && curFrame.pps == null) {
-                        curFrame.pps = prevFrame.pps;
-                        curFrame.ppsBuf = prevFrame.ppsBuf;
-                    }
-                    prevFrame = curFrame;
-                }
-            }
-        };
-    }
-
     public static Observable<AVFrame> skipUntilKeyFrame(Observable<AVFrame> frames) {
         return frames.skipWhile(f -> !f.isIFrame());
     }
@@ -183,18 +162,18 @@ public class TsWorker {
             }
             int dataSize = splitFrame.stream().mapToInt(b -> b.remaining()).sum();
             dataSize += (splitFrame.size() * 4);
-    
+
             ByteBuffer acquire = FramePool.acquire(dataSize);
             for (ByteBuffer nalData : splitFrame) {
                 acquire.putInt(nalData.remaining());
                 acquire.put(nalData);
             }
             acquire.clear();
-    
+
             AVFrame frame = AVFrame.video(pespkt.streamOffset, pespkt.streamSize, iframe ? IDR_SLICE : NON_IDR_SLICE);
             frame.spsBuf = spsBuf;
             frame.ppsBuf = ppsBuf;
-            frame.setSps(sps);
+            frame.sps = sps;
             frame.pps = pps;
             frame.dataOffset = 0;
             frame.dataSize = dataSize;
@@ -204,7 +183,7 @@ public class TsWorker {
             frame.duration = pespkt.duration;
             return frame;
         });
-    
+
         return frames;
     }
 
@@ -245,7 +224,7 @@ public class TsWorker {
                 ByteBuffer asc = FramePool.copy(payload);
                 asc.flip();
                 payload.limit(lim);
-    
+
                 AVFrame f = AVFrame.audio(frame.streamOffset + pos, asc.remaining());
                 f.adtsHeader = hdr;
                 f.data = asc;
@@ -269,11 +248,11 @@ public class TsWorker {
             return Observable.from(output);
         });
         return o;
-    
+
     }
 
     public static Observable<AVFrame> frameStream(Observable<TSPkt> tsPackets) {
-    
+
         Observable<GroupedObservable<Integer, TSPkt>> tsByPid = tsPackets.groupBy(pkt -> pkt.pid);
         Observable<List<TSPkt>> tsPacketLists = tsByPid.flatMap(g -> split(g, (list, pkt) -> pkt.payloadStart));
         Log2 log = new Log2();
@@ -288,11 +267,11 @@ public class TsWorker {
                 return TsWorkerTest.UNKNOWN_PES;
             }
         });
-    
+
         Observable<AVFrame> frames = audioVideoPes.flatMap(_pes -> {
             String pestype = _pes.getKey();
             Observable<PESPacket> pes = setPESPacketDuration(_pes);
-    
+
             if (TsWorkerTest.AUDIO_PES.equals(pestype)) {
                 Observable<AVFrame> aframes = audio(pes);
                 aframes = adtstoasc(aframes);
@@ -303,13 +282,27 @@ public class TsWorker {
                 });
                 return aframes;
             } else if (TsWorkerTest.VIDEO_PES.equals(pestype)) {
-                return video(pes).doOnNext(populateSps());
+                return populateSpsPps(video(pes));
             }
             return Observable.empty();
         });
-    
+
         frames = frames.filter(f -> f.isVideo() || f.adtsHeader != null);
         frames = skipUntilKeyFrame(frames);
         return frames;
+    }
+
+    static Observable<AVFrame> populateSpsPps(Observable<AVFrame> video) {
+        return video.scan((prevFrame, curFrame) -> {
+            if (prevFrame != null && curFrame.sps == null) {
+                curFrame.sps = prevFrame.sps;
+                curFrame.spsBuf = prevFrame.spsBuf;
+            }
+            if (prevFrame != null && curFrame.pps == null) {
+                curFrame.pps = prevFrame.pps;
+                curFrame.ppsBuf = prevFrame.ppsBuf;
+            }
+            return curFrame;
+        });
     }
 }

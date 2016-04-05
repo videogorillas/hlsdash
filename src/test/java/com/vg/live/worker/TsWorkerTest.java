@@ -189,7 +189,7 @@ public class TsWorkerTest {
     }
 
     private SampleEntry videoSampleEntry(AVFrame videoFrame) {
-        SeqParameterSet sps = videoFrame.getSps();
+        SeqParameterSet sps = videoFrame.sps;
         int nalLenSize = 4;
         AvcCBox avcC = new AvcCBox(sps.profile_idc, 0, sps.level_idc, nalLenSize, asList(videoFrame.spsBuf),
                 asList(videoFrame.ppsBuf));

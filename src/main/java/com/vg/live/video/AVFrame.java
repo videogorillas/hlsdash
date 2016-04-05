@@ -20,7 +20,7 @@ public class AVFrame {
     public transient ByteBuffer data;
     public int dataSize;
     public int dataOffset;
-    private transient SeqParameterSet sps;
+    public transient SeqParameterSet sps;
     public transient PictureParameterSet pps;
     public transient ADTSHeader adtsHeader;
     public transient ByteBuffer spsBuf;
@@ -73,18 +73,6 @@ public class AVFrame {
 
     public boolean isAudio() {
         return !isVideo();
-    }
-
-    public SeqParameterSet getSps() {
-        return sps;
-    }
-
-    public PictureParameterSet getPps() {
-        return pps;
-    }
-
-    public void setSps(SeqParameterSet sps) {
-        this.sps = sps;
     }
 
 }
