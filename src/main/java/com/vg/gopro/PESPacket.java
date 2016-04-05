@@ -112,13 +112,9 @@ public class PESPacket {
     }
 
     public static long readTs(ByteBuffer is) {
-        int b0 = is.get() & 0x0e;
-        int b1 = is.get() & 0xff;
-        int b2 = is.get() & 0xff;
-        int b3 = is.get() & 0xff;
-        int b4 = is.get() & 0xff;
-        long pts = (536870912 * b0) + (b1 << 22) + ((b2 >> 1) << 15) + (b3 << 7) + (b4 >> 1);
-        return pts;
+        long intOverflow = 536870912L * (is.get() & 0x0e);
+        return intOverflow + (((is.get() & 0xff) << 22) | (((is.get() & 0xff) >> 1) << 15) | ((is.get() & 0xff) << 7)
+                | ((is.get() & 0xff) >> 1));
     }
 
     public static PESPacket mpeg1Pes(int b0, int len, int streamId, ByteBuffer is, long pos) {
