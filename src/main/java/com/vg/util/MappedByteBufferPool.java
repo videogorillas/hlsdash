@@ -19,6 +19,7 @@
 package com.vg.util;
 
 import js.nio.ByteBuffer;
+import js.util.Collection;
 import js.util.Queue;
 import js.util.concurrent.ConcurrentHashMap;
 import js.util.concurrent.ConcurrentLinkedQueue;
@@ -28,11 +29,32 @@ public class MappedByteBufferPool {
     private final ConcurrentMap<Integer, Queue<ByteBuffer>> directBuffers;
     private final ConcurrentMap<Integer, Queue<ByteBuffer>> heapBuffers;
     private final int factor;
+    private int hits;
+    private int misses;
+    private int releases;
 
     public MappedByteBufferPool(int factor) {
         this.factor = factor;
         this.directBuffers = new ConcurrentHashMap<>();
         this.heapBuffers = new ConcurrentHashMap<>();
+    }
+
+    @Override
+    public String toString() {
+        Collection<Queue<ByteBuffer>> values = heapBuffers.values();
+        String str = "[";
+        str += hits;
+        str += "/";
+        str += misses;
+        str += "/";
+        str += releases;
+        str += " ";
+        for (Queue<ByteBuffer> queue : values) {
+            str += queue.size();
+            str += ",";
+        }
+        str += "]";
+        return str;
     }
 
     public ByteBuffer acquire(int size, boolean direct) {
@@ -45,12 +67,15 @@ public class MappedByteBufferPool {
             result = byteBuffers.poll();
 
         if (result == null) {
+            misses++;
             int capacity = bucket * factor;
             result = newByteBuffer(capacity, direct);
+        } else {
+            hits++;
         }
 
         BufferUtil.clear(result);
-        if(result.capacity() < size) {
+        if (result.capacity() < size) {
             throw new RuntimeException("FramePool BUG");
         }
         return result;
@@ -63,9 +88,9 @@ public class MappedByteBufferPool {
     public void release(ByteBuffer buffer) {
         if (buffer == null)
             return; // nothing to do
-
+        releases++;
         // validate that this buffer is from this pool
-//        assert ((buffer.capacity() % factor) == 0);
+        //        assert ((buffer.capacity() % factor) == 0);
 
         int bucket = bucketFor(buffer.capacity());
         ConcurrentMap<Integer, Queue<ByteBuffer>> buffers = buffersFor(buffer.isDirect());

@@ -154,6 +154,7 @@ public class TsWorkerTest {
                     }
                     aTrack.addFrame(mp4(f, stream.startPts));
                 }
+                FramePool.release(f._data);
             } catch (Exception e) {
                 console.error(e);
                 throw new RuntimeException(e);
@@ -175,8 +176,10 @@ public class TsWorkerTest {
         }, err -> {
             console.log("err", err);
             console.log("stack", JSObjectAdapter.$get(err, "stack"));
-        }, () ->{
-            console.log("done");
+        }, () -> {
+            console.log("done.");
+            console.log("FramePool", FramePool.pool);
+            console.log("FramePool", FramePool.pool.toString());
         });
 
     }
