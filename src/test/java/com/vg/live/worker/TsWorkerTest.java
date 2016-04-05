@@ -119,6 +119,7 @@ public class TsWorkerTest {
         //        File file = new File("testdata/apple/06402.ts");
         File outputDir = emptyDir(new File("tmp/hlsjs"));
         ByteBuffer buf = readFileToByteBuffer(file);
+        long start = System.currentTimeMillis();
 
         TSStream stream = new TSStream();
         Observable<TSPkt> tsPackets = TsWorker.tsPackets(Observable.just(buf), 0);
@@ -137,7 +138,7 @@ public class TsWorkerTest {
         FileChannelWrapper w = NIOUtils.writableChannel(file2);
         MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(w);
         Observable<MP4Muxer> reduce = frames.reduce((m, f) -> {
-            console.log("frame", f.toString());
+//            console.log("frame", f.toString());
             try {
                 if (f.isVideo()) {
                     FramesMP4MuxerTrack vTrack = (FramesMP4MuxerTrack) muxer.getVideoTrack();
@@ -177,10 +178,13 @@ public class TsWorkerTest {
             console.log("err", err);
             console.log("stack", JSObjectAdapter.$get(err, "stack"));
         }, () -> {
-            console.log("done.");
+            long time = System.currentTimeMillis() - start;
+            console.log("done in "+time+"msec");
             console.log("FramePool", FramePool.pool);
             console.log("FramePool", FramePool.pool.toString());
         });
+//        console.log("done");
+//        System.exit(1);
 
     }
 

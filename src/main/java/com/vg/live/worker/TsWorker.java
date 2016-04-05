@@ -43,7 +43,7 @@ public class TsWorker {
                 ts.setLimit(Math.min(pos + 188, ts.capacity()));
                 TSPkt pkt = new TSPkt();
                 TSPkt.parsePacket(pkt, ts);
-                System.out.println(pkt.toString());
+//                System.out.println(pkt.toString());
                 pkt.dataOffset = pos;
                 pkt.streamOffset = streamPosition.longValue();
                 streamPosition.add(188);
