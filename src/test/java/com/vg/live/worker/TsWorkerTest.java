@@ -8,8 +8,10 @@ import static org.jcodec.codecs.mpeg4.mp4.EsdsBox.createEsdsBox;
 import static org.jcodec.common.io.NIOUtils.writableFileChannel;
 import static org.jcodec.containers.mp4.MP4Packet.createMP4Packet;
 import static org.stjs.javascript.Global.console;
+import static org.stjs.javascript.Global.window;
 import static org.stjs.javascript.JSObjectAdapter.$get;
 
+import com.vg.util.SimpleAjax;
 import js.io.File;
 import js.io.FileNotFoundException;
 import js.io.IOException;
@@ -21,8 +23,10 @@ import org.jcodec.codecs.h264.H264Utils;
 import org.jcodec.codecs.h264.io.model.SeqParameterSet;
 import org.jcodec.codecs.h264.mp4.AvcCBox;
 import org.jcodec.codecs.mpeg4.mp4.EsdsBox;
+import org.jcodec.common.io.ByteBufferSeekableByteChannel;
 import org.jcodec.common.io.FileChannelWrapper;
 import org.jcodec.common.io.NIOUtils;
+import org.jcodec.common.io.SeekableByteChannel;
 import org.jcodec.containers.mp4.MP4Packet;
 import org.jcodec.containers.mp4.TrackType;
 import org.jcodec.containers.mp4.boxes.Box;
@@ -40,6 +44,13 @@ import com.vg.js.bridge.Rx.Observable;
 import com.vg.live.video.AVFrame;
 import com.vg.live.video.TSPkt;
 import com.vg.util.ADTSHeader;
+import org.stjs.javascript.JSStringAdapter;
+import org.stjs.javascript.dom.Element;
+import org.stjs.javascript.dom.Video;
+import org.stjs.javascript.dom.media.MediaSource;
+import org.stjs.javascript.dom.media.URL;
+import org.stjs.javascript.typed.ArrayBuffer;
+import org.stjs.javascript.typed.Int8Array;
 
 public class TsWorkerTest {
 
@@ -113,16 +124,45 @@ public class TsWorkerTest {
 
     }
 
+    public void testPipelineInBrowser() throws Exception {
+        SimpleAjax.getArrayBuffer("testdata/zoomoo/76fab9ea8d4dc3941bd0872b7bef2c9c_31321.ts").subscribe(arrayBuf -> {
+            ByteBuffer buf = ByteBuffer.wrap(new Int8Array(arrayBuf));
+            Int8Array outArr = new Int8Array(arrayBuf.byteLength + 4242);
+            ByteBufferSeekableByteChannel out = new ByteBufferSeekableByteChannel(ByteBuffer.wrap(outArr));
+
+            try {
+                runPipeline(buf, out);
+            } catch (Exception e) {
+                console.log(e.getStackTrace());
+                throw new RuntimeException(e);
+            }
+
+            Video video = (Video) window.document.createElement("video");
+            String url = null;
+            JSObjectAdapter.$js("url = webkitURL.createObjectURL(new Blob([outArr], {type: 'video/mp4'}));");
+            video.src = url;
+            video.controls = true;
+            window.document.body.appendChild(video);
+        });
+    }
+
     @Test
     public void testPipeline() throws Exception {
-        File file = new File("testdata/zoomoo/76fab9ea8d4dc3941bd0872b7bef2c9c_31321.ts");
         //        File file = new File("testdata/apple/06402.ts");
+        File file = new File("testdata/zoomoo/76fab9ea8d4dc3941bd0872b7bef2c9c_31321.ts");
         File outputDir = emptyDir(new File("tmp/hlsjs"));
         ByteBuffer buf = readFileToByteBuffer(file);
+        File file2 = new File(outputDir, "out.mp4");
+        FileChannelWrapper w = NIOUtils.writableChannel(file2);
+        runPipeline(buf, w);
+        w.close();
+    }
+
+    private void runPipeline(ByteBuffer bufIn, SeekableByteChannel out) throws Exception {
         long start = System.currentTimeMillis();
 
         TSStream stream = new TSStream();
-        Observable<TSPkt> tsPackets = TsWorker.tsPackets(Observable.just(buf), 0);
+        Observable<TSPkt> tsPackets = TsWorker.tsPackets(Observable.just(bufIn), 0);
         tsPackets = tsPackets.doOnNext(pkt -> stream.parsePSI(pkt));
         tsPackets = tsPackets.filter(pkt -> TSPkt.isElementaryStreamPID(pkt.pid) && !stream.isPMT(pkt.pid));
 
@@ -134,9 +174,7 @@ public class TsWorkerTest {
             }
         });
 
-        File file2 = new File(outputDir, "out.mp4");
-        FileChannelWrapper w = NIOUtils.writableChannel(file2);
-        MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(w);
+        MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(out);
         Observable<MP4Muxer> reduce = frames.reduce((m, f) -> {
 //            console.log("frame", f.toString());
             try {
@@ -165,7 +203,6 @@ public class TsWorkerTest {
         reduce = reduce.doOnNext(m -> {
             try {
                 m.writeHeader();
-                w.close();
             } catch (Exception e) {
                 console.log("e", e);
                 console.log("stack", $get(e, "stack"));
@@ -181,7 +218,7 @@ public class TsWorkerTest {
             long time = System.currentTimeMillis() - start;
             console.log("done in "+time+"msec");
             console.log("FramePool", FramePool.pool);
-            console.log("FramePool", FramePool.pool.toString());
+//            console.log("FramePool", FramePool.pool.toString());
         });
 //        console.log("done");
 //        System.exit(1);
