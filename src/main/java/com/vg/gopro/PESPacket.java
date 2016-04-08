@@ -1,5 +1,7 @@
 package com.vg.gopro;
 
+import static org.stjs.javascript.Global.console;
+
 import org.stjs.javascript.Global;
 
 import js.lang.System;
@@ -47,13 +49,18 @@ public class PESPacket {
     }
 
     public static int nextPsMarkerPosition(ByteBuffer buf) {
-        for (int i = buf.position() + 4; i < buf.limit() - 4; i++) {
-            int int1 = buf.getIntAt(i);
-            if (PESPacket.psMarker(int1)) {
-                return i;
+        int lim = buf.limit() - 4;
+        int val = 0xffffffff;
+        for (int i = buf.position() + 4; i < lim; i++) {
+            val <<= 8;
+            val |= (buf.getAt(i) & 0xff);
+            if ((val & 0xffffff00) == 0x100) {
+                if (PESPacket.psMarker(val)) {
+                    return i;
+                }
             }
         }
-        return buf.limit();
+        return lim;
     }
 
     public PESPacket(ByteBuffer data, long pts, int streamId, int length, long pos, long dts) {
