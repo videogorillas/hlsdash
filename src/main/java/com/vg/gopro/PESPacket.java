@@ -60,7 +60,7 @@ public class PESPacket {
                 }
             }
         }
-        return lim;
+        return buf.limit();
     }
 
     public PESPacket(ByteBuffer data, long pts, int streamId, int length, long pos, long dts) {
