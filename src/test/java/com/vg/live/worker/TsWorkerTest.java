@@ -5,19 +5,13 @@ import static com.vg.util.ADTSHeader.decoderSpecific;
 import static js.util.Arrays.asList;
 import static org.jcodec.codecs.h264.mp4.AvcCBox.createAvcCBox;
 import static org.jcodec.codecs.mpeg4.mp4.EsdsBox.createEsdsBox;
-import static org.jcodec.common.io.NIOUtils.writableFileChannel;
 import static org.jcodec.containers.mp4.MP4Packet.createMP4Packet;
 import static org.stjs.javascript.Global.console;
 import static org.stjs.javascript.Global.window;
+import static org.stjs.javascript.JSCollections.$array;
+import static org.stjs.javascript.JSCollections.$map;
 import static org.stjs.javascript.JSObjectAdapter.$get;
-
-import com.vg.util.SimpleAjax;
-import js.io.File;
-import js.io.FileNotFoundException;
-import js.io.IOException;
-import js.lang.System;
-import js.nio.ByteBuffer;
-import js.util.List;
+import static org.stjs.javascript.JSObjectAdapter.$put;
 
 import org.jcodec.codecs.h264.H264Utils;
 import org.jcodec.codecs.h264.io.model.SeqParameterSet;
@@ -38,19 +32,25 @@ import org.jcodec.containers.mps.psi.PATSection;
 import org.jcodec.containers.mps.psi.PMTSection;
 import org.junit.Test;
 import org.stjs.javascript.Global;
+import org.stjs.javascript.JSCollections;
 import org.stjs.javascript.JSObjectAdapter;
+import org.stjs.javascript.dom.Video;
+import org.stjs.javascript.dom.media.URL;
+import org.stjs.javascript.file.Blob;
+import org.stjs.javascript.typed.Int8Array;
 
 import com.vg.js.bridge.Rx.Observable;
 import com.vg.live.video.AVFrame;
 import com.vg.live.video.TSPkt;
 import com.vg.util.ADTSHeader;
-import org.stjs.javascript.JSStringAdapter;
-import org.stjs.javascript.dom.Element;
-import org.stjs.javascript.dom.Video;
-import org.stjs.javascript.dom.media.MediaSource;
-import org.stjs.javascript.dom.media.URL;
-import org.stjs.javascript.typed.ArrayBuffer;
-import org.stjs.javascript.typed.Int8Array;
+import com.vg.util.SimpleAjax;
+
+import js.io.File;
+import js.io.FileNotFoundException;
+import js.io.IOException;
+import js.lang.System;
+import js.nio.ByteBuffer;
+import js.util.List;
 
 public class TsWorkerTest {
 
@@ -128,21 +128,24 @@ public class TsWorkerTest {
         SimpleAjax.getArrayBuffer("testdata/zoomoo/76fab9ea8d4dc3941bd0872b7bef2c9c_31321.ts").subscribe(arrayBuf -> {
             ByteBuffer buf = ByteBuffer.wrap(new Int8Array(arrayBuf));
             Int8Array outArr = new Int8Array(arrayBuf.byteLength + 4242);
+            JSObjectAdapter.$put(window, "OUTARR", outArr);
             ByteBufferSeekableByteChannel out = new ByteBufferSeekableByteChannel(ByteBuffer.wrap(outArr));
+            long start = System.currentTimeMillis();
 
-            try {
-                runPipeline(buf, out);
-            } catch (Exception e) {
-                console.log(e.getStackTrace());
-                throw new RuntimeException(e);
-            }
-
-            Video video = (Video) window.document.createElement("video");
-            String url = null;
-            JSObjectAdapter.$js("url = webkitURL.createObjectURL(new Blob([outArr], {type: 'video/mp4'}));");
-            video.src = url;
-            video.controls = true;
-            window.document.body.appendChild(video);
+            Observable<MP4Muxer> _runPipeline = _runPipeline(buf, out);
+            _runPipeline.subscribe(x -> {
+                console.log("next");
+            }, err -> {
+                console.error(err);
+            }, () -> {
+                long time = System.currentTimeMillis() - start;
+                Video video = (Video) window.document.createElement("video");
+                String url = URL.createObjectURL(new Blob($array(outArr), $map("type", "video/mp4")));
+                video.src = url;
+                video.controls = true;
+                window.document.body.appendChild(video);
+                console.log("done in " + time + " msec");
+            });
         });
     }
 
@@ -158,8 +161,7 @@ public class TsWorkerTest {
         w.close();
     }
 
-    private void runPipeline(ByteBuffer bufIn, SeekableByteChannel out) throws Exception {
-        long start = System.currentTimeMillis();
+    private Observable<MP4Muxer> _runPipeline(ByteBuffer bufIn, SeekableByteChannel out) {
 
         TSStream stream = new TSStream();
         Observable<TSPkt> tsPackets = TsWorker.tsPackets(Observable.just(bufIn), 0);
@@ -176,7 +178,7 @@ public class TsWorkerTest {
 
         MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(out);
         Observable<MP4Muxer> reduce = frames.reduce((m, f) -> {
-//            console.log("frame", f.toString());
+            //console.log("frame", f.toString());
             try {
                 if (f.isVideo()) {
                     FramesMP4MuxerTrack vTrack = (FramesMP4MuxerTrack) muxer.getVideoTrack();
@@ -209,6 +211,12 @@ public class TsWorkerTest {
                 throw new RuntimeException(e);
             }
         });
+        return reduce;
+    }
+
+    private void runPipeline(ByteBuffer bufIn, SeekableByteChannel out) throws Exception {
+        long start = System.currentTimeMillis();
+        Observable<MP4Muxer> reduce = _runPipeline(bufIn, out);
         reduce.subscribe(x -> {
             System.out.println(x);
         }, err -> {
@@ -216,12 +224,12 @@ public class TsWorkerTest {
             console.log("stack", JSObjectAdapter.$get(err, "stack"));
         }, () -> {
             long time = System.currentTimeMillis() - start;
-            console.log("done in "+time+"msec");
+            console.log("done in " + time + "msec");
             console.log("FramePool", FramePool.pool);
-//            console.log("FramePool", FramePool.pool.toString());
+            //            console.log("FramePool", FramePool.pool.toString());
         });
-//        console.log("done");
-//        System.exit(1);
+        //        console.log("done");
+        //        System.exit(1);
 
     }
 
