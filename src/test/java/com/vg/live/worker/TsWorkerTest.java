@@ -170,7 +170,10 @@ public class TsWorkerTest {
     static Observable<MP4Segment> m4s(ByteBuffer inputBuf, long startTime, int sequenceNumber) {
 
         Observable<AVFrame> frames = frames(inputBuf);
-        frames = frames.filter(f -> f.isVideo());
+
+        на этом кадре происходит кирдык. браузер не может проиграть видео. почему - хз
+
+        frames = frames.filter(f -> f.isVideo()).take(53);
         MutableBoolean hasInit = new MutableBoolean(false);
         long timescale = 90000;
 
@@ -213,7 +216,7 @@ public class TsWorkerTest {
             long mdatSize = dataSize + 8;
             Header mdat = Header.createHeader("mdat", mdatSize);
             int frameCount = segment.trackRun.sampleSize.size();
-            int headerSize = (frameCount * 16) * 2;
+            int headerSize = (frameCount * 16) * 2 + 68 + 12;
             ByteBuffer hdr = FramePool.acquire(headerSize);
             m4s.styp.write(hdr);
             m4s.sidx.write(hdr);

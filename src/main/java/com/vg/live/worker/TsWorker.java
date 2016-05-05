@@ -7,6 +7,7 @@ import static com.vg.util.Utils.lastElement;
 import static org.jcodec.codecs.h264.io.model.NALUnitType.IDR_SLICE;
 import static org.jcodec.codecs.h264.io.model.NALUnitType.NON_IDR_SLICE;
 import static org.jcodec.common.io.NIOUtils.skip;
+import static org.stjs.javascript.Global.console;
 
 import org.jcodec.codecs.h264.H264Utils;
 import org.jcodec.codecs.h264.io.model.NALUnitType;
@@ -26,6 +27,7 @@ import js.lang.System;
 import js.nio.ByteBuffer;
 import js.util.ArrayList;
 import js.util.List;
+import org.stjs.javascript.Global;
 
 public class TsWorker {
     public static final String UNKNOWN_PES = "unknown";
@@ -143,6 +145,8 @@ public class TsWorker {
         return frames;
     }
 
+    public static int EEE = 0;
+
     public static Observable<AVFrame> video(Observable<PESPacket> packets) {
         Observable<AVFrame> frames = packets.map(pespkt -> {
             ByteBuffer payload = pespkt.payload();
@@ -159,6 +163,7 @@ public class TsWorker {
             for (ByteBuffer nalData : splitFrame) {
                 nalData.mark();
                 NALUnitType naltype = TsWorker.readNal(nalData.get() & 0xff);
+                console.log(EEE, naltype.getName());
                 iframe |= naltype == NALUnitType.IDR_SLICE;
                 if (naltype == NALUnitType.SPS) {
                     spsBuf = nalData.slice();
@@ -198,6 +203,9 @@ public class TsWorker {
             frame.pts = pespkt.pts;
             frame.dts = pespkt.dts == -1 ? null : pespkt.dts;
             frame.duration = pespkt.duration;
+
+            EEE++;
+
             return frame;
         });
 

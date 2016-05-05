@@ -1,26 +1,31 @@
 package com.vg.live.worker;
 
-import static org.stjs.javascript.Global.console;
-import static org.stjs.javascript.Global.window;
-
+import com.vg.js.bridge.Rx;
+import com.vg.js.bridge.Rx.Observable;
+import com.vg.js.bridge.Rx.Subject;
+import com.vg.live.video.MP4Segment;
+import com.vg.util.MutableLong;
+import com.vg.util.SimpleAjax;
+import js.nio.ByteBuffer;
 import org.junit.Test;
 import org.stjs.javascript.Array;
+import org.stjs.javascript.dom.Anchor;
 import org.stjs.javascript.dom.DOMEvent;
+import org.stjs.javascript.dom.Element;
 import org.stjs.javascript.dom.Video;
 import org.stjs.javascript.dom.media.MediaSource;
 import org.stjs.javascript.dom.media.SourceBuffer;
 import org.stjs.javascript.dom.media.URL;
+import org.stjs.javascript.file.Blob;
 import org.stjs.javascript.typed.ArrayBuffer;
 import org.stjs.javascript.typed.DataView;
 import org.stjs.javascript.typed.Int8Array;
 
-import com.vg.js.bridge.Rx;
-import com.vg.js.bridge.Rx.Observable;
-import com.vg.live.video.MP4Segment;
-import com.vg.util.MutableLong;
-import com.vg.util.SimpleAjax;
-
-import js.nio.ByteBuffer;
+import static org.stjs.javascript.Global.console;
+import static org.stjs.javascript.Global.window;
+import static org.stjs.javascript.JSCollections.$array;
+import static org.stjs.javascript.JSCollections.$map;
+import static org.stjs.javascript.JSObjectAdapter.$put;
 
 public class SimpleDashTest {
     private static final String SOURCEOPEN = "sourceopen";
@@ -31,6 +36,93 @@ public class SimpleDashTest {
     private static final String BUFFER_UPDATEEND = "updateend";
     private SourceBuffer videoBuffer;
     private MediaSource mediaSource;
+
+    @Test
+    public void testSeries() throws Exception {
+        MutableLong mseq = new MutableLong(0);
+        MutableLong duration = new MutableLong(0);
+
+        Array<String> urls = $array(
+                "testdata/zoomoo/4760a09c958138d875af68fd53f4a9a8_80917.ts",
+                "testdata/zoomoo/4760a09c958138d875af68fd53f4a9a8_80918.ts",
+                "testdata/zoomoo/4760a09c958138d875af68fd53f4a9a8_80919.ts",
+                "testdata/zoomoo/4760a09c958138d875af68fd53f4a9a8_80920.ts",
+                "testdata/zoomoo/4760a09c958138d875af68fd53f4a9a8_80921.ts",
+                "testdata/zoomoo/4760a09c958138d875af68fd53f4a9a8_80922.ts");
+
+        Subject<String> urlrx = new Subject<>();
+        urlrx
+                .flatMap(SimpleAjax::getArrayBuffer)
+                .flatMap(ts -> {
+                    ByteBuffer inputBuf = ByteBuffer.wrap(new Int8Array(ts));
+                    Observable<MP4Segment> m4s = TsWorkerTest.m4s(inputBuf, duration.longValue(), (int) mseq.longValue() + 1);
+
+                    if (mseq.longValue() == 0) {
+                        return m4s.doOnNext(m -> {
+                            ByteBuffer init = m.init;
+                            console.log("init", init);
+                            DataView dataView = dataView(init);
+                            console.log("dataView", dataView, dataView.buffer, dataView.byteOffset, dataView.byteLength);
+                            videoBuffer.appendBuffer(dataView);
+                            console.log("init segment added");
+                        });
+                    } else {
+                        return m4s;
+                    }
+                })
+                .doOnNext(m4s -> {
+                    Blob blob = new Blob($array(dataView(m4s.init), dataView(m4s.data)), $map("type", "video/mpeg"));
+                    Anchor a = (Anchor) window.document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.target = "_blank";
+                    a.download = "generated.mp4";
+                    a.innerHTML = "download mp4";
+                    window.document.body.appendChild(a);
+                })
+                .flatMap(m4s -> {
+                    console.log("videoBuffer.updating", videoBuffer.updating);
+                    Observable<Boolean> bufferReady = Observable.just(true);
+                    if (videoBuffer.updating) {
+                        bufferReady = Rx.Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND).take(1).map(ee -> true);
+                    }
+                    return bufferReady.doOnNext(e -> {
+                        console.log("add data", mseq.longValue(), duration.longValue());
+                        videoBuffer.appendBuffer(dataView(m4s.data));
+
+                        for (int i = 0; i < m4s.trun.getSampleCount(); i++) {
+                            duration.add(m4s.trun.getSampleDuration(i));
+                        }
+                    });
+                })
+                .doOnNext(b -> {
+                    mseq.add(1);
+//                    if (mseq.longValue() < urls.$length()) {
+//                        urlrx.onNext(urls.$get(mseq.longValue()));
+//                    }
+                })
+                .subscribe();
+
+        String mimeType = "video/mp4";
+        String vcodecs = "avc1.4d4028";
+        mediaSource = new MediaSource();
+        Video video = (Video) window.document.createElement("video");
+        video.setAttribute("controls", "true");
+        window.document.body.appendChild(video);
+        video.src = URL.createObjectURL(mediaSource);
+        Observable<DOMEvent> open = Rx.Observable.fromEvent(mediaSource, SOURCEOPEN);
+        open = open.doOnNext(e -> {
+            console.log("source open");
+            videoBuffer = mediaSource.addSourceBuffer(mimeType + "; codecs=\"" + vcodecs + "\"");
+            videoBuffer.addEventListener(BUFFER_ERROR, (_e) -> {
+                console.log("videoBuffer error", _e);
+            });
+            $put(window, "mediaSource", mediaSource);
+            $put(window, "videoBuffer", videoBuffer);
+        });
+        open.subscribe(ee -> {
+            urlrx.onNext(urls.$get(0));
+        });
+    }
 
     @Test
     public void testName() throws Exception {
