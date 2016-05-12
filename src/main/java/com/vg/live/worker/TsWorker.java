@@ -145,8 +145,6 @@ public class TsWorker {
         return frames;
     }
 
-    public static int EEE = 0;
-
     public static Observable<AVFrame> video(Observable<PESPacket> packets) {
         Observable<AVFrame> frames = packets.map(pespkt -> {
             ByteBuffer payload = pespkt.payload();
@@ -163,7 +161,6 @@ public class TsWorker {
             for (ByteBuffer nalData : splitFrame) {
                 nalData.mark();
                 NALUnitType naltype = TsWorker.readNal(nalData.get() & 0xff);
-                console.log(EEE, naltype.getName());
                 iframe |= naltype == NALUnitType.IDR_SLICE;
                 if (naltype == NALUnitType.SPS) {
                     spsBuf = nalData.slice();
@@ -203,8 +200,6 @@ public class TsWorker {
             frame.pts = pespkt.pts;
             frame.dts = pespkt.dts == -1 ? null : pespkt.dts;
             frame.duration = pespkt.duration;
-
-            EEE++;
 
             return frame;
         });
