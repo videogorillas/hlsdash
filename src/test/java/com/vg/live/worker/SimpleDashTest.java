@@ -9,6 +9,7 @@ import com.vg.util.SimpleAjax;
 import js.nio.ByteBuffer;
 import org.junit.Test;
 import org.stjs.javascript.Array;
+import org.stjs.javascript.Global;
 import org.stjs.javascript.dom.Anchor;
 import org.stjs.javascript.dom.DOMEvent;
 import org.stjs.javascript.dom.Element;
@@ -206,7 +207,7 @@ public class SimpleDashTest {
                      })
                      .flatMap(e -> {
                          long mseq = _mseq.longValue();
-                         if (mseq < 3) {
+                         if (mseq < 2) {
                              _mseq.add(1);
                              String url = "tmp/hlsjs/chunk.m4s";
 //                             String url = "tmp/hlsjs/chunk-stream0-" + zeroPad((int) mseq, 5) + ".m4s";
@@ -215,6 +216,10 @@ public class SimpleDashTest {
                                               .doOnNext(arrayBuffer -> {
                                                   videoBuffer.appendBuffer(arrayBuffer);
                                                   console.log("segment added", mseq, url);
+                                                  Global.setTimeout(()->{
+                                                      mediaSource.endOfStream();
+                                                      console.log("endOfStream");
+                                                  }, 1000); 
                                               });
                          } else {
                              return Observable.empty();

@@ -1,0 +1,1 @@
+ffmpeg -i testdata/zoomoo/76fab9ea8d4dc3941bd0872b7bef2c9c_31321.ts -vcodec copy -an -f dash -min_seg_duration 1000500000 -use_timeline 1 -init_seg_name init.m4s -media_seg_name chunk.m4s tmp/hlsjs/file.mpd
