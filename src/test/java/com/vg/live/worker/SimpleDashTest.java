@@ -180,7 +180,7 @@ public class SimpleDashTest {
     }
 
     @Test
-    public void testName3() throws Exception {
+    public void testReadFromDisk() throws Exception {
         String mimeType = "video/mp4";
         String vcodecs = "avc1.4d4028";
         mediaSource = new MediaSource();
@@ -194,7 +194,8 @@ public class SimpleDashTest {
                          videoBuffer = mediaSource.addSourceBuffer(mimeType + "; codecs=\"" + vcodecs + "\"");
                      })
                      .flatMap(e -> {
-                         return SimpleAjax.getArrayBuffer("tmp/hlsjs/init-stream0.m4s");
+//                         return SimpleAjax.getArrayBuffer("tmp/hlsjs/init-stream0.m4s");
+                         return SimpleAjax.getArrayBuffer("tmp/hlsjs/init.m4s");
                      })
                      .doOnNext(arrayBuffer -> {
                          videoBuffer.appendBuffer(arrayBuffer);
@@ -207,7 +208,8 @@ public class SimpleDashTest {
                          long mseq = _mseq.longValue();
                          if (mseq < 3) {
                              _mseq.add(1);
-                             String url = "tmp/hlsjs/chunk-stream0-" + zeroPad((int) mseq, 5) + ".m4s";
+                             String url = "tmp/hlsjs/chunk.m4s";
+//                             String url = "tmp/hlsjs/chunk-stream0-" + zeroPad((int) mseq, 5) + ".m4s";
                              console.log("loading", url);
                              return SimpleAjax.getArrayBuffer(url)
                                               .doOnNext(arrayBuffer -> {

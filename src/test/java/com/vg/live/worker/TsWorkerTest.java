@@ -171,7 +171,7 @@ public class TsWorkerTest {
 
         Observable<AVFrame> frames = frames(inputBuf);
 
-        на этом кадре происходит кирдык. браузер не может проиграть видео. почему - хз
+//        на этом кадре происходит кирдык. браузер не может проиграть видео. почему - хз
 
         frames = frames.filter(f -> f.isVideo()).take(53);
         MutableBoolean hasInit = new MutableBoolean(false);
