@@ -97,9 +97,9 @@ public class SimpleDashTest {
                 })
                 .doOnNext(b -> {
                     mseq.add(1);
-//                    if (mseq.longValue() < urls.$length()) {
-//                        urlrx.onNext(urls.$get(mseq.longValue()));
-//                    }
+                    if (mseq.longValue() < urls.$length()) {
+                        urlrx.onNext(urls.$get(mseq.longValue()));
+                    }
                 })
                 .subscribe();
 

@@ -173,7 +173,7 @@ public class TsWorkerTest {
 
 //        на этом кадре происходит кирдык. браузер не может проиграть видео. почему - хз
 
-        frames = frames.filter(f -> f.isVideo()).take(53);
+        frames = frames.filter(f -> f.isVideo());
         MutableBoolean hasInit = new MutableBoolean(false);
         long timescale = 90000;
 
