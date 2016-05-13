@@ -59,56 +59,6 @@ import js.util.List;
 
 public class TsWorkerTest {
 
-    public static class TSStream {
-        public PATSection pat;
-        public PMTSection pmt;
-        public int[] pmtPIDs;
-        public long startPts = -1;
-
-        public boolean isPMT(int pid) {
-            if (pmtPIDs != null) {
-                for (int pmtPID : pmtPIDs) {
-                    if (pid == pmtPID)
-                        return true;
-                }
-            }
-            return false;
-        }
-
-        /**
-         * https://en.wikipedia.org/wiki/Program-specific_information
-         * 
-         * @param pkt
-         */
-        public void parsePSI(TSPkt pkt) {
-            TSStream stream = this;
-            if (pkt.pid == PAT_PID) {
-                ByteBuffer payload = pkt.payload();
-                if (pkt.payloadStart) {
-                    int pointerField = payload.get() & 0xff;
-                    if (pointerField != 0) {
-                        payload.setPosition(payload.position() + pointerField);
-                    }
-                }
-                PATSection pat = PATSection.parsePAT(payload);
-                stream.pat = pat;
-                stream.pmtPIDs = stream.pat.getPrograms()
-                                           .values();
-            }
-            if (stream.isPMT(pkt.pid)) {
-                ByteBuffer payload = pkt.payload();
-                if (pkt.payloadStart) {
-                    int pointerField = payload.get() & 0xff;
-                    if (pointerField != 0) {
-                        payload.setPosition(payload.position() + pointerField);
-                    }
-                }
-                PMTSection pmt = PMTSection.parsePMT(payload);
-                stream.pmt = pmt;
-            }
-        }
-    }
-
     static MP4Packet mp4(AVFrame f) {
         MP4Packet pkt = createMP4Packet(f.data(), f.pts, 90000, Math.max(0, f.duration), 0, f.isIFrame(), null, 0, f.pts, 0);
         return pkt;
@@ -167,90 +117,6 @@ public class TsWorkerTest {
         w.close();
     }
 
-    static Observable<MP4Segment> m4s(ByteBuffer inputBuf, long startTime, int sequenceNumber) {
-
-        Observable<AVFrame> frames = frames(inputBuf);
-
-//        на этом кадре происходит кирдык. браузер не может проиграть видео. почему - хз
-
-        frames = frames.filter(f -> f.isVideo());
-        MutableBoolean hasInit = new MutableBoolean(false);
-        long timescale = 90000;
-
-        MP4Segment segment = createMP4Segment(timescale, startTime, sequenceNumber);
-        ByteBuffer init = FramePool.acquire(2048);
-        ByteBuffer data = FramePool.acquire(inputBuf.capacity());
-
-        frames = frames.doOnNext(frame -> {
-            if (!hasInit.value) {
-                hasInit.value = true;
-                FileTypeBox ftyp = createFileTypeBox("iso5", 1, asList("avc1", "iso5", "dash"));
-                MovieBox moov = dashinit(frame);
-                ftyp.write(init);
-                moov.write(init);
-                init.flip();
-            }
-        });
-
-        ByteBuffer _mdat = FramePool.acquire(inputBuf.capacity());
-
-        Observable<MP4Segment> m4srx = frames.reduce((m4s, frame) -> {
-            //            console.log(frame.pts, frame.dts, (frame.pts - frame.dts));
-            m4s.sidx.references[0].subsegment_duration += frame.duration;
-            m4s.trackRun.sampleCompositionOffset.add((int) (frame.pts - frame.dts));
-            m4s.trackRun.sampleDuration.add((int) frame.duration);
-            int flags = frame.isIFrame() ? 0x02000000 : 0x01010000;
-            m4s.trackRun.sampleFlags.add(flags);
-            m4s.trackRun.sampleSize.add(frame.dataSize);
-            _mdat.putBuf(frame.data());
-            FramePool.release(frame._data);
-            return m4s;
-        }, segment);
-
-        Observable<MP4Segment> outputrx = m4srx.map(m4s -> {
-            m4s.trun = MP4Segment.createTrunBox(m4s.trackRun);
-            m4s.moof.getTracks()[0].add(m4s.trun);
-
-            _mdat.flip();
-            long dataSize = _mdat.remaining();
-            long mdatSize = dataSize + 8;
-            Header mdat = Header.createHeader("mdat", mdatSize);
-            int frameCount = segment.trackRun.sampleSize.size();
-            int headerSize = (frameCount * 16) * 2 + 68 + 12;
-            ByteBuffer hdr = FramePool.acquire(headerSize);
-            m4s.styp.write(hdr);
-            m4s.sidx.write(hdr);
-            int sidxEndPosition = hdr.position();
-            m4s.moof.write(hdr);
-            mdat.write(hdr);
-
-            int videoDataOffset = hdr.position();
-            m4s.trun.setDataOffset(videoDataOffset - 68);
-            m4s.sidx.references[0].referenced_size = videoDataOffset + dataSize - sidxEndPosition;
-
-            hdr.clear();
-            m4s.styp.write(hdr);
-            m4s.sidx.write(hdr);
-            m4s.moof.write(hdr);
-            mdat.write(hdr);
-            hdr.flip();
-            while (hdr.hasRemaining()) {
-                data.putBuf(hdr);
-            }
-            while (_mdat.hasRemaining()) {
-                data.putBuf(_mdat);
-            }
-            data.flip();
-            FramePool.release(hdr);
-            FramePool.release(_mdat);
-
-            segment.init = init;
-            segment.data = data;
-            return segment;
-        });
-        return outputrx;
-    }
-
     @Test
     public void testDashPipeline() throws Exception {
         //        File file = new File("testdata/apple/06402.ts");
@@ -260,7 +126,7 @@ public class TsWorkerTest {
         FileChannelWrapper w = NIOUtils.writableChannel(new File(outputDir, "init.m4s"));
         FileChannelWrapper output = NIOUtils.writableChannel(new File(outputDir, "chunk.m4s"));
 
-        Observable<AVFrame> frames = frames(inputBuf);
+        Observable<AVFrame> frames = M4sWorker.frames(inputBuf);
 
         MutableBoolean hasInit = new MutableBoolean(false);
         long timescale = 90000;
@@ -289,9 +155,10 @@ public class TsWorkerTest {
                   }
               })
               .reduce((m4s, frame) -> {
-                  console.log(frame.pts, frame.dts, (frame.pts - frame.dts));
+                  int compOffset = frame.dts != null ? (int) (frame.pts - frame.dts) : 0;
+                  console.log(frame.pts, frame.dts, compOffset);
                   m4s.sidx.references[0].subsegment_duration += frame.duration;
-                  m4s.trackRun.sampleCompositionOffset.add((int) (frame.pts - frame.dts));
+                  m4s.trackRun.sampleCompositionOffset.add(compOffset);
                   m4s.trackRun.sampleDuration.add((int) frame.duration);
                   int flags = frame.isIFrame() ? 0x02000000 : 0x01010000;
                   m4s.trackRun.sampleFlags.add(flags);
@@ -362,7 +229,7 @@ public class TsWorkerTest {
 
     private Observable<MP4Muxer> _runPipeline(ByteBuffer bufIn, SeekableByteChannel out) {
 
-        Observable<AVFrame> frames = frames(bufIn);
+        Observable<AVFrame> frames = M4sWorker.frames(bufIn);
 
         MP4Muxer muxer = MP4Muxer.createMP4MuxerToChannel(out);
         Observable<MP4Muxer> reduce = frames.reduce((m, f) -> {
@@ -400,26 +267,6 @@ public class TsWorkerTest {
             }
         });
         return reduce;
-    }
-
-    public static Observable<AVFrame> frames(ByteBuffer bufIn) {
-        TSStream stream = new TSStream();
-        Observable<TSPkt> tsPackets = TsWorker.tsPackets(Observable.just(bufIn), 0);
-        tsPackets = tsPackets.doOnNext(pkt -> stream.parsePSI(pkt));
-        tsPackets = tsPackets.filter(pkt -> TSPkt.isElementaryStreamPID(pkt.pid) && !stream.isPMT(pkt.pid));
-
-        Observable<AVFrame> frames = TsWorker.frameStream(tsPackets);
-
-        frames = frames.doOnNext(f -> {
-            if (stream.startPts == -1) {
-                stream.startPts = f.pts;
-            }
-            f.pts = f.pts - stream.startPts;
-            if (f.dts != null && f.dts != -1) {
-                f.dts = f.dts - stream.startPts;
-            }
-        });
-        return frames;
     }
 
     private void runPipeline(ByteBuffer bufIn, SeekableByteChannel out) throws Exception {

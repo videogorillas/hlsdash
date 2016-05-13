@@ -22,6 +22,7 @@ import org.stjs.javascript.typed.ArrayBuffer;
 import org.stjs.javascript.typed.DataView;
 import org.stjs.javascript.typed.Int8Array;
 
+import static com.vg.util.Utils.dataView;
 import static org.stjs.javascript.Global.console;
 import static org.stjs.javascript.Global.window;
 import static org.stjs.javascript.JSCollections.$array;
@@ -56,7 +57,7 @@ public class SimpleDashTest {
                 .flatMap(SimpleAjax::getArrayBuffer)
                 .flatMap(ts -> {
                     ByteBuffer inputBuf = ByteBuffer.wrap(new Int8Array(ts));
-                    Observable<MP4Segment> m4s = TsWorkerTest.m4s(inputBuf, duration.longValue(), (int) mseq.longValue() + 1);
+                    Observable<MP4Segment> m4s = M4sWorker.m4s(inputBuf, duration.longValue(), (int) mseq.longValue() + 1);
 
                     if (mseq.longValue() == 0) {
                         return m4s.doOnNext(m -> {
@@ -149,7 +150,7 @@ public class SimpleDashTest {
 
         Observable<DOMEvent> updateEndRx = downloadTs.flatMap(ts -> {
             ByteBuffer inputBuf = ByteBuffer.wrap(new Int8Array(ts));
-            Observable<MP4Segment> m4s = TsWorkerTest.m4s(inputBuf, 0, 1);
+            Observable<MP4Segment> m4s = M4sWorker.m4s(inputBuf, 0, 1);
             m4s = m4s.doOnNext(m -> {
                 ByteBuffer init = m.init;
                 console.log("init", init);
@@ -172,12 +173,6 @@ public class SimpleDashTest {
             console.log("event", x);
         });
 
-    }
-
-    private static DataView dataView(ByteBuffer bb) {
-        Int8Array array = (Int8Array) (Object) bb.array();
-        DataView view = new DataView(array.buffer, bb.position(), bb.remaining());
-        return view;
     }
 
     @Test
