@@ -9,13 +9,11 @@ import com.vg.util.SimpleAjax;
 import js.nio.ByteBuffer;
 import org.stjs.javascript.Array;
 import org.stjs.javascript.Map;
-import org.stjs.javascript.dom.Anchor;
 import org.stjs.javascript.dom.DOMEvent;
 import org.stjs.javascript.dom.Video;
 import org.stjs.javascript.dom.media.MediaSource;
 import org.stjs.javascript.dom.media.SourceBuffer;
 import org.stjs.javascript.dom.media.URL;
-import org.stjs.javascript.file.Blob;
 import org.stjs.javascript.functions.Callback1;
 import org.stjs.javascript.typed.DataView;
 import org.stjs.javascript.typed.Int8Array;
@@ -34,6 +32,7 @@ public class HLSPlayer {
     private long duration;
     private Map<String, Boolean> knownUrls;
     private boolean live;
+    private Observable<DOMEvent> videoUpdateRx;
     private Disposable disposable;
 
     private static final int BUFFER_TIME = 15;
@@ -62,6 +61,7 @@ public class HLSPlayer {
                 .flatMap(b -> parseTsUrls(m3u8Url))
                 .doOnNext(tsUrl -> knownUrls.$put(tsUrl, true))
                 .concatMap(tsUrl -> appendNextSegment(tsUrl).pausableBuffered(bufferUnderflow()))
+                .flatMap(x -> cleanup())
                 .subscribe();
     }
 
@@ -132,12 +132,7 @@ public class HLSPlayer {
 //                    window.document.body.appendChild(a);
 //                })
                 .flatMap(m4s -> {
-//                    console.log("videoBuffer.updating", videoBuffer.updating);
-                    Observable<Boolean> bufferReady = Observable.just(true);
-                    if (videoBuffer.updating) {
-                        bufferReady = Rx.Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND).take(1).map(ee -> true);
-                    }
-                    return bufferReady.doOnNext(e -> {
+                    return bufferReady().doOnNext(e -> {
                         console.log("add data", sequenceNo, "pts", duration);
                         videoBuffer.appendBuffer(dataView(m4s.data));
 
@@ -164,6 +159,7 @@ public class HLSPlayer {
             videoBuffer.addEventListener(BUFFER_ERROR, (_e) -> {
                 console.log("videoBuffer error", _e);
             });
+            videoUpdateRx = Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND).share();
             $put(window, "mediaSource", mediaSource);
             $put(window, "videoBuffer", videoBuffer);
         }).map(e -> true);
@@ -188,6 +184,27 @@ public class HLSPlayer {
     private boolean bufferedEnough() {
         int len = videoBuffer.buffered.length;
         return len > 0 && videoBuffer.buffered.end(len - 1) - video.currentTime >= BUFFER_TIME;
+    }
+
+    private Observable<Boolean> bufferReady() {
+        Observable<Boolean> ready = Observable.create(observer -> {
+            if (videoBuffer.updating) {
+                observer.onError("buffer updating");
+            } else {
+                observer.onNext(true);
+                observer.onCompleted();
+            }
+        });
+        return ready.retryWhen(errors -> errors.flatMap(err -> videoUpdateRx.take(1)));
+    }
+
+    private Observable<Boolean> cleanup() {
+        return bufferReady().doOnNext(x -> {
+            if (videoBuffer.buffered.length > 0 && video.currentTime > 10) {
+                console.log("buffered", videoBuffer.buffered.start(0), videoBuffer.buffered.end(0));
+                videoBuffer.remove(0, video.currentTime - 10);
+            }
+        });
     }
 
     public void close() {
