@@ -8,6 +8,7 @@ import com.vg.live.worker.M4sWorker;
 import com.vg.util.SimpleAjax;
 import js.nio.ByteBuffer;
 import org.stjs.javascript.Array;
+import org.stjs.javascript.Map;
 import org.stjs.javascript.dom.Anchor;
 import org.stjs.javascript.dom.DOMEvent;
 import org.stjs.javascript.dom.Video;
@@ -23,7 +24,6 @@ import static com.vg.util.Utils.dataView;
 import static com.vg.util.Utils.toAbsoluteUri;
 import static org.stjs.javascript.Global.console;
 import static org.stjs.javascript.Global.window;
-import static org.stjs.javascript.JSCollections.$array;
 import static org.stjs.javascript.JSCollections.$map;
 import static org.stjs.javascript.JSObjectAdapter.$put;
 
@@ -32,6 +32,8 @@ public class HLSPlayer {
     private MediaSource mediaSource;
     private int sequenceNo;
     private long duration;
+    private Map<String, Boolean> knownUrls;
+    private boolean live;
     private Disposable disposable;
 
     private static final int BUFFER_TIME = 15;
@@ -52,17 +54,21 @@ public class HLSPlayer {
     public void load(String m3u8Url, Callback1 onDone) {
         sequenceNo = 0;
         duration = 0;
+        knownUrls = $map();
 
         disposable = init()
                 .doOnNext(b -> onDone.$invoke(null))
                 .doOnError(err -> onDone.$invoke(err))
-                .flatMap(b -> tsUrls(m3u8Url))
+                .flatMap(b -> parseTsUrls(m3u8Url))
+                .doOnNext(tsUrl -> knownUrls.$put(tsUrl, true))
                 .concatMap(tsUrl -> appendNextSegment(tsUrl).pausableBuffered(bufferUnderflow()))
                 .subscribe();
     }
 
-    private Observable<String> tsUrls(String url) {
-        Observable<HLSPlaylist> m3u8 = loadHLSPlaylist(url).flatMap(hls -> {
+    private Observable<String> parseTsUrls(String url) {
+        Observable<HLSPlaylist> m3u8 = loadHLSPlaylist(url)
+                .doOnNext(m -> console.log("!!!!!!!!!!!"))
+                .flatMap(hls -> {
             Array<HLSPlaylist.Variant> variants = hls.getVariantList();
             if (hls.getMediaList().$length() == 0 && variants.$length() == 0) {
                 return Observable.$throw("Empty HLS. Neither media nor stream variants are present.");
@@ -73,11 +79,29 @@ public class HLSPlayer {
                 return loadHLSPlaylist(variantUri);
             }
             return Observable.just(hls);
+        }).share();
+
+        Observable<HLSPlaylist> updates = m3u8.flatMap(hls -> {
+            return Observable
+                    .interval(5000)
+//                    .pausable(...) TODO
+                    .flatMap(x -> {
+                        if (live) {
+                            return loadHLSPlaylist(hls.uri) ;
+                        } else {
+                            return Observable.empty();
+                        }
+                    });
         });
 
-        return m3u8.flatMap(hls -> {
+        Observable<HLSPlaylist> playlists = m3u8.merge(updates);
+
+        return playlists.flatMap(hls -> {
+            live = !hls.hasEndList();
+
             return Observable.from(hls.getMediaList())
-                    .map(media -> toAbsoluteUri(url, media.url));
+                    .map(media -> toAbsoluteUri(url, media.url))
+                    .filter(tsUrl -> !knownUrls.$get(tsUrl));
         });
     }
 
@@ -100,15 +124,15 @@ public class HLSPlayer {
                         return m4s;
                     }
                 })
-                .doOnNext(m4s -> {
-                    Blob blob = new Blob($array(dataView(m4s.init), dataView(m4s.data)), $map("type", "video/mpeg"));
-                    Anchor a = (Anchor) window.document.createElement("a");
-                    a.href = URL.createObjectURL(blob);
-                    a.target = "_blank";
-                    a.download = "generated.mp4";
-                    a.innerHTML = "download mp4";
-                    window.document.body.appendChild(a);
-                })
+//                .doOnNext(m4s -> {
+//                    Blob blob = new Blob($array(dataView(m4s.init), dataView(m4s.data)), $map("type", "video/mpeg"));
+//                    Anchor a = (Anchor) window.document.createElement("a");
+//                    a.href = URL.createObjectURL(blob);
+//                    a.target = "_blank";
+//                    a.download = "generated.mp4";
+//                    a.innerHTML = "download mp4";
+//                    window.document.body.appendChild(a);
+//                })
                 .flatMap(m4s -> {
 //                    console.log("videoBuffer.updating", videoBuffer.updating);
                     Observable<Boolean> bufferReady = Observable.just(true);
