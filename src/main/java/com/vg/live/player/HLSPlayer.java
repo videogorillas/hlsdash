@@ -66,9 +66,7 @@ public class HLSPlayer {
     }
 
     private Observable<String> parseTsUrls(String url) {
-        Observable<HLSPlaylist> m3u8 = loadHLSPlaylist(url)
-                .doOnNext(m -> console.log("!!!!!!!!!!!"))
-                .flatMap(hls -> {
+        Observable<HLSPlaylist> m3u8 = loadHLSPlaylist(url).flatMap(hls -> {
             Array<HLSPlaylist.Variant> variants = hls.getVariantList();
             if (hls.getMediaList().$length() == 0 && variants.$length() == 0) {
                 return Observable.$throw("Empty HLS. Neither media nor stream variants are present.");
