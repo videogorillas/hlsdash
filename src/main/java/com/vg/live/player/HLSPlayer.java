@@ -5,15 +5,18 @@ import com.vg.js.bridge.Rx.Disposable;
 import com.vg.js.bridge.Rx.Observable;
 import com.vg.live.video.MP4Segment;
 import com.vg.live.worker.M4sWorker;
+import com.vg.util.MutableLong;
 import com.vg.util.SimpleAjax;
 import js.nio.ByteBuffer;
 import org.stjs.javascript.Array;
 import org.stjs.javascript.Map;
+import org.stjs.javascript.dom.Anchor;
 import org.stjs.javascript.dom.DOMEvent;
 import org.stjs.javascript.dom.Video;
 import org.stjs.javascript.dom.media.MediaSource;
 import org.stjs.javascript.dom.media.SourceBuffer;
 import org.stjs.javascript.dom.media.URL;
+import org.stjs.javascript.file.Blob;
 import org.stjs.javascript.functions.Callback1;
 import org.stjs.javascript.typed.DataView;
 import org.stjs.javascript.typed.Int8Array;
@@ -22,6 +25,7 @@ import static com.vg.util.Utils.dataView;
 import static com.vg.util.Utils.toAbsoluteUri;
 import static org.stjs.javascript.Global.console;
 import static org.stjs.javascript.Global.window;
+import static org.stjs.javascript.JSCollections.$array;
 import static org.stjs.javascript.JSCollections.$map;
 import static org.stjs.javascript.JSObjectAdapter.$put;
 
@@ -32,7 +36,10 @@ public class HLSPlayer {
     private long duration;
     private Map<String, Boolean> knownUrls;
     private boolean live;
+    private SourceBuffer videoBuffer;
+    private SourceBuffer audioBuffer;
     private Observable<DOMEvent> videoUpdateRx;
+    private Observable<DOMEvent> audioUpdateRx;
     private Disposable disposable;
 
     private static final int BUFFER_TIME = 15;
@@ -44,7 +51,6 @@ public class HLSPlayer {
     private static final String BUFFER_ERROR = "error";
     private static final String BUFFER_UPDATEEND = "updateend";
     private static final String TIMEUPDATE = "timeupdate";
-    private SourceBuffer videoBuffer;
 
     public HLSPlayer(Video video) {
         this.video = video;
@@ -59,9 +65,13 @@ public class HLSPlayer {
                 .doOnNext(b -> onDone.$invoke(null))
                 .doOnError(err -> onDone.$invoke(err))
                 .flatMap(b -> parseTsUrls(m3u8Url))
+                .take(1)
+//                .flatMap(b -> Observable.just("http://localhost/code/hlsdash/testdata/zoomoo/76fab9ea8d4dc3941bd0872b7bef2c9c_31321.ts"))
                 .doOnNext(tsUrl -> knownUrls.$put(tsUrl, true))
-                .concatMap(tsUrl -> appendNextSegment(tsUrl).pausableBuffered(bufferUnderflow()))
-                .flatMap(x -> cleanup())
+                .concatMap(tsUrl -> appendNextSegment(tsUrl).pausableBuffered(bufferUnderflow(videoBuffer)))
+//                .flatMap(x -> cleanup(videoBuffer, videoUpdateRx))
+//                .flatMap(x -> cleanup(audioBuffer, audioUpdateRx))
+                .doOnError(err -> console.log("something went wrong", err))
                 .subscribe();
     }
 
@@ -82,7 +92,7 @@ public class HLSPlayer {
         Observable<HLSPlaylist> updates = m3u8.flatMap(hls -> {
             return Observable
                     .interval(5000)
-//                    .pausable(...) TODO
+//                    .flatMapFirst(...) TODO
                     .flatMap(x -> {
                         if (live) {
                             return loadHLSPlaylist(hls.uri) ;
@@ -104,50 +114,60 @@ public class HLSPlayer {
     }
 
     private Observable<Boolean> appendNextSegment(String url) {
+        MutableLong videoDuration = new MutableLong(0);
+
         return SimpleAjax.getArrayBuffer(url)
                 .flatMap(ts -> {
                     ByteBuffer inputBuf = ByteBuffer.wrap(new Int8Array(ts));
-                    Observable<MP4Segment> m4s = M4sWorker.m4s(inputBuf, duration, sequenceNo + 1);
-
+                    return M4sWorker.m4s(inputBuf, duration, sequenceNo + 1);
+                })
+                .doOnNext(m4s -> {
                     if (sequenceNo == 0) {
-                        return m4s.doOnNext(m -> {
-                            ByteBuffer initSeg = m.init;
-                            console.log("init", initSeg);
-                            DataView dataView = dataView(initSeg);
-                            console.log("dataView", dataView, dataView.buffer, dataView.byteOffset, dataView.byteLength);
-                            videoBuffer.appendBuffer(dataView);
-                            console.log("init segment added");
-                        });
-                    } else {
-                        return m4s;
+                        ByteBuffer initSeg = m4s.init;
+                        console.log("init", initSeg);
+                        DataView dataView = dataView(initSeg);
+                        console.log("dataView", dataView, dataView.buffer, dataView.byteOffset, dataView.byteLength);
+                        SourceBuffer buffer = m4s.isVideo() ? videoBuffer : audioBuffer;
+                        buffer.appendBuffer(dataView);
+                        console.log("init segment added video=" + m4s.isVideo());
                     }
                 })
-//                .doOnNext(m4s -> {
-//                    Blob blob = new Blob($array(dataView(m4s.init), dataView(m4s.data)), $map("type", "video/mpeg"));
-//                    Anchor a = (Anchor) window.document.createElement("a");
-//                    a.href = URL.createObjectURL(blob);
-//                    a.target = "_blank";
-//                    a.download = "generated.mp4";
-//                    a.innerHTML = "download mp4";
-//                    window.document.body.appendChild(a);
-//                })
+                .doOnError(err -> console.log("something wrong", err))
+                .doOnNext(m4s -> {
+                    Blob blob = new Blob($array(dataView(m4s.init), dataView(m4s.data)), $map("type", "video/mpeg"));
+                    Anchor a = (Anchor) window.document.createElement("a");
+                    a.href = URL.createObjectURL(blob);
+                    a.target = "_blank";
+                    a.download = "generated.mp4";
+                    a.innerHTML = "download mp4";
+                    window.document.body.appendChild(a);
+                })
                 .flatMap(m4s -> {
-                    return bufferReady().doOnNext(e -> {
-                        console.log("add data", sequenceNo, "pts", duration);
-                        videoBuffer.appendBuffer(dataView(m4s.data));
+                    Observable<Boolean> bufferReady = m4s.isVideo() ? videoBufferReady() : audioBufferReady();
+                    return bufferReady.doOnNext(e -> {
+                        console.log("add data video=" + m4s.isVideo(), sequenceNo, "pts", duration);
+                        SourceBuffer buffer = m4s.isVideo() ? videoBuffer : audioBuffer;
+                        buffer.appendBuffer(dataView(m4s.data));
 
-                        for (int i = 0; i < m4s.trun.getSampleCount(); i++) {
-                            duration += m4s.trun.getSampleDuration(i);
+                        if (m4s.isVideo()) {
+                            for (int i = 0; i < m4s.trun.getSampleCount(); i++) {
+                                videoDuration.add(m4s.trun.getSampleDuration(i));
+                            }
                         }
-
-                        sequenceNo++;
                     });
+                })
+                .doOnCompleted(() -> {
+                    sequenceNo++;
+                    duration += videoDuration.longValue();
                 });
     }
 
     private Observable<Boolean> init() {
-        String mimeType = "video/mp4";
+        String vMimeType = "video/mp4";
         String vcodecs = "avc1.4d4028";
+
+        String aMimeType = "audio/mp4";
+        String acodecs = "mp4a.40.2";
 
         mediaSource = new MediaSource();
         video.src = URL.createObjectURL(mediaSource);
@@ -155,13 +175,18 @@ public class HLSPlayer {
         Observable<DOMEvent> open = Rx.Observable.fromEvent(mediaSource, SOURCEOPEN);
         return open.doOnNext(e -> {
             console.log("source open");
-            videoBuffer = mediaSource.addSourceBuffer(mimeType + "; codecs=\"" + vcodecs + "\"");
+
+            videoBuffer = mediaSource.addSourceBuffer(vMimeType + "; codecs=\"" + vcodecs + "\"");
             videoBuffer.addEventListener(BUFFER_ERROR, (_e) -> {
                 console.log("videoBuffer error", _e);
             });
             videoUpdateRx = Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND).share();
-            $put(window, "mediaSource", mediaSource);
-            $put(window, "videoBuffer", videoBuffer);
+
+            audioBuffer = mediaSource.addSourceBuffer(aMimeType + "; codecs=\"" + acodecs + "\"");
+            audioBuffer.addEventListener(BUFFER_ERROR, (_e) -> {
+                console.log("audioBuffer error", _e);
+            });
+            audioUpdateRx = Observable.fromEvent(audioBuffer, BUFFER_UPDATEEND).share();
         }).map(e -> true);
     }
 
@@ -173,36 +198,44 @@ public class HLSPlayer {
         });
     }
 
-    private Observable<Boolean> bufferUnderflow() {
+    private Observable<Boolean> bufferUnderflow(SourceBuffer buffer) {
         return Observable
-                .merge(Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND),
+                .merge(Observable.fromEvent(buffer, BUFFER_UPDATEEND),
                        Observable.fromEvent(video, TIMEUPDATE))
-                .map(e -> !bufferedEnough())
+                .map(e -> !bufferedEnough(buffer))
                 .doOnNext(ub -> console.log("underbuffered", ub));
     }
 
-    private boolean bufferedEnough() {
-        int len = videoBuffer.buffered.length;
-        return len > 0 && videoBuffer.buffered.end(len - 1) - video.currentTime >= BUFFER_TIME;
+    private boolean bufferedEnough(SourceBuffer buffer) {
+        int len = buffer.buffered.length;
+        return len > 0 && buffer.buffered.end(len - 1) - video.currentTime >= BUFFER_TIME;
     }
 
-    private Observable<Boolean> bufferReady() {
+    private Observable<Boolean> videoBufferReady() {
+        return bufferReady(videoBuffer, videoUpdateRx);
+    }
+
+    private Observable<Boolean> audioBufferReady() {
+        return bufferReady(audioBuffer, audioUpdateRx);
+    }
+
+    private Observable<Boolean> bufferReady(SourceBuffer buffer, Observable bufferUpdateRx) {
         Observable<Boolean> ready = Observable.create(observer -> {
-            if (videoBuffer.updating) {
+            if (buffer.updating) {
                 observer.onError("buffer updating");
             } else {
                 observer.onNext(true);
                 observer.onCompleted();
             }
         });
-        return ready.retryWhen(errors -> errors.flatMap(err -> videoUpdateRx.take(1)));
+        return ready.retryWhen(errors -> errors.flatMap(err -> bufferUpdateRx.take(1)));
     }
 
-    private Observable<Boolean> cleanup() {
-        return bufferReady().doOnNext(x -> {
-            if (videoBuffer.buffered.length > 0 && video.currentTime > 10) {
-                console.log("buffered", videoBuffer.buffered.start(0), videoBuffer.buffered.end(0));
-                videoBuffer.remove(0, video.currentTime - 10);
+    private Observable<Boolean> cleanup(SourceBuffer buffer, Observable bufferUpdateRx) {
+        return bufferReady(buffer, bufferUpdateRx).doOnNext(x -> {
+            if (buffer.buffered.length > 0 && video.currentTime > 10) {
+                console.log("buffered", buffer.buffered.start(0), buffer.buffered.end(0));
+                buffer.remove(0, video.currentTime - 10);
             }
         });
     }

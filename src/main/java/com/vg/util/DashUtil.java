@@ -1,23 +1,29 @@
 package com.vg.util;
 
+import static com.vg.util.ADTSHeader.decoderSpecific;
 import static js.util.Arrays.asList;
 import static org.jcodec.codecs.h264.mp4.AvcCBox.createAvcCBox;
+import static org.jcodec.codecs.mpeg4.mp4.EsdsBox.createEsdsBox;
 import static org.jcodec.containers.mp4.boxes.ChunkOffsetsBox.createChunkOffsetsBox;
 import static org.jcodec.containers.mp4.boxes.MediaHeaderBox.createMediaHeaderBox;
 import static org.jcodec.containers.mp4.boxes.MovieHeaderBox.createMovieHeaderBox;
 import static org.jcodec.containers.mp4.boxes.SampleDescriptionBox.createSampleDescriptionBox;
 import static org.jcodec.containers.mp4.boxes.SampleSizesBox.createSampleSizesBox2;
 import static org.jcodec.containers.mp4.boxes.SampleToChunkBox.createSampleToChunkBox;
+import static org.jcodec.containers.mp4.boxes.SoundMediaHeaderBox.createSoundMediaHeaderBox;
 import static org.jcodec.containers.mp4.boxes.TimeToSampleBox.createTimeToSampleBox;
 import static org.jcodec.containers.mp4.boxes.TrackHeaderBox.createTrackHeaderBox;
 import static org.jcodec.containers.mp4.boxes.VideoMediaHeaderBox.createVideoMediaHeaderBox;
+import static org.jcodec.containers.mp4.muxer.MP4Muxer.terminatorAtom;
 import static org.stjs.javascript.Global.console;
 
 import org.jcodec.codecs.h264.H264Utils;
 import org.jcodec.codecs.h264.io.model.SeqParameterSet;
 import org.jcodec.codecs.h264.mp4.AvcCBox;
+import org.jcodec.codecs.mpeg4.mp4.EsdsBox;
 import org.jcodec.common.model.Rational;
 import org.jcodec.containers.mp4.TrackType;
+import org.jcodec.containers.mp4.boxes.AudioSampleEntry;
 import org.jcodec.containers.mp4.boxes.ChunkOffsetsBox;
 import org.jcodec.containers.mp4.boxes.DataInfoBox;
 import org.jcodec.containers.mp4.boxes.DataRefBox;
@@ -36,6 +42,7 @@ import org.jcodec.containers.mp4.boxes.SampleDescriptionBox;
 import org.jcodec.containers.mp4.boxes.SampleEntry;
 import org.jcodec.containers.mp4.boxes.SampleSizesBox;
 import org.jcodec.containers.mp4.boxes.SampleToChunkBox;
+import org.jcodec.containers.mp4.boxes.SoundMediaHeaderBox;
 import org.jcodec.containers.mp4.boxes.SyncSamplesBox;
 import org.jcodec.containers.mp4.boxes.TimeToSampleBox;
 import org.jcodec.containers.mp4.boxes.TrackExtendsBox;
@@ -141,7 +148,7 @@ public class DashUtil {
         return sar != null ? sar : Rational.ONE;
     }
 
-    public static MovieBox dashinit(AVFrame videoFrame) {
+    public static MovieBox dashinitVideo(AVFrame videoFrame) {
         int timescale = 90000;
         long created = System.currentTimeMillis();
         long modified = created;
@@ -195,6 +202,67 @@ public class DashUtil {
                                                 .add(stco)))));
 
         return moov;
+    }
+
+    public static MovieBox dashinitAudio(AVFrame audioFrame) {
+        int timescale = 90000;
+        long created = System.currentTimeMillis();
+        long modified = created;
+
+        MovieBox moov = MovieBox.createMovieBox();
+        int[] matrix = new int[] { 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000 };
+        MovieHeaderBox mvhd = createMovieHeaderBox(timescale, 0, 1.0f, 1.0f, created, modified, matrix, 3);
+        MovieExtendsBox mvex = MovieExtendsBox.createMovieExtendsBox();
+        TrackExtendsBox trex = TrackExtendsBox.createTrackExtendsBox(1, 1, 0x00010000);
+
+        TrakBox trak = TrakBox.createTrakBox();
+        TrackHeaderBox tkhd = createTrackHeaderBox(1, 0, 0, 0, created, modified, 1f, (short) 0, 0, matrix);
+
+        NodeBox edts = new NodeBox(new Header("edts"));
+        EditListBox elst = EditListBox.createEditListBox(asList(new Edit(0, 0, 1)));
+
+        MediaBox mdia = MediaBox.createMediaBox();
+        MediaHeaderBox mdhd = createMediaHeaderBox(timescale, 0, ENG, created, modified, 0);
+        HandlerBox hdlr = HandlerBox.createHandlerBox("mhlr", TrackType.SOUND.getHandler(), "appl", 0, 0);
+        MediaInfoBox minf = MediaInfoBox.createMediaInfoBox();
+        SoundMediaHeaderBox smhd = createSoundMediaHeaderBox();
+        DataInfoBox dinf = DataInfoBox.createDataInfoBox();
+        DataRefBox dref = DataRefBox.createDataRefBox();
+
+        NodeBox stbl = new NodeBox(new Header("stbl"));
+        SampleDescriptionBox stsd = createSampleDescriptionBox(new SampleEntry[] {
+                DashUtil.audioSampleEntry(audioFrame) });
+        TimeToSampleBox stts = createTimeToSampleBox(new TimeToSampleBox.TimeToSampleEntry[0]);
+        SampleToChunkBox stsc = createSampleToChunkBox(new SampleToChunkBox.SampleToChunkEntry[0]);
+        SampleSizesBox stsz = createSampleSizesBox2(new int[0]);
+        ChunkOffsetsBox stco = createChunkOffsetsBox(new long[0]);
+
+        moov.add(mvhd)
+            .add(mvex.add(trex))
+            .add(trak.add(tkhd)
+                     .add(edts.add(elst))
+                     .add(mdia.add(mdhd)
+                              .add(hdlr)
+                              .add(minf.add(smhd)
+                                       .add(dinf.add(dref))
+                                       .add(stbl.add(stsd)
+                                                .add(stts)
+                                                .add(stsc)
+                                                .add(stsz)
+                                                .add(stco)))));
+
+        return moov;
+    }
+
+    private static SampleEntry audioSampleEntry(AVFrame audioFrame) {
+        ADTSHeader hdr = audioFrame.adtsHeader;
+        EsdsBox esds = createEsdsBox(decoderSpecific(hdr), (hdr.getObjectType() + 1) << 5, 0, 256 * 1024, 128 * 1024, 1);
+        AudioSampleEntry ase = AudioSampleEntry.createAudioSampleEntry(Header.createHeader("mp4a", 0L),
+                (short)1, (short)hdr.getChanConfig(), (short)16, hdr.getSampleRate(), (short)0, 0, '\ufffe', 0,
+                0, 0, 0, 2, (short)0);
+        ase.add(esds);
+        ase.add(terminatorAtom());
+        return ase;
     }
 
     public static SampleEntry videoSampleEntry(AVFrame videoFrame) {

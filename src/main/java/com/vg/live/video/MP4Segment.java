@@ -21,6 +21,9 @@ import org.jcodec.containers.mp4.boxes.TrackFragmentHeaderBox;
 import org.jcodec.containers.mp4.boxes.TrunBox;
 
 public class MP4Segment {
+    public String mimeType;
+    public String codecs;
+
     public SegmentTypeBox styp;
     public SegmentIndexBox sidx;
     public MovieFragmentBox moof;
@@ -85,4 +88,7 @@ public class MP4Segment {
         return trun;
     }
 
+    public boolean isVideo() {
+        return mimeType.startsWith("video");
+    }
 }

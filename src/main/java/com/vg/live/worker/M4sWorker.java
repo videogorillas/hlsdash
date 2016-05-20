@@ -10,11 +10,14 @@ import js.nio.ByteBuffer;
 import org.jcodec.containers.mp4.boxes.FileTypeBox;
 import org.jcodec.containers.mp4.boxes.Header;
 import org.jcodec.containers.mp4.boxes.MovieBox;
+import org.stjs.javascript.Global;
 
 import static com.vg.live.video.MP4Segment.createMP4Segment;
-import static com.vg.util.DashUtil.dashinit;
+import static com.vg.util.DashUtil.dashinitAudio;
+import static com.vg.util.DashUtil.dashinitVideo;
 import static js.util.Arrays.asList;
 import static org.jcodec.containers.mp4.boxes.FileTypeBox.createFileTypeBox;
+import static org.stjs.javascript.Global.console;
 
 public class M4sWorker {
     public static Rx.Observable<AVFrame> frames(ByteBuffer bufIn) {
@@ -38,31 +41,38 @@ public class M4sWorker {
     }
 
     public static Rx.Observable<MP4Segment> m4s(ByteBuffer inputBuf, long startTime, int sequenceNumber) {
+        return frames(inputBuf)
+                .groupBy(AVFrame::isVideo)
+                .flatMap(frames1 -> framesToM4s(frames1, startTime, sequenceNumber, inputBuf.capacity()));
+    }
 
-        Rx.Observable<AVFrame> frames = frames(inputBuf);
-
-//        на этом кадре происходит кирдык. браузер не может проиграть видео. почему - хз
-
-        frames = frames.filter(f -> f.isVideo());
-        MutableBoolean hasInit = new MutableBoolean(false);
+    private static Rx.Observable<MP4Segment> framesToM4s(Rx.Observable<AVFrame> frames, long startTime,
+                                                         int sequenceNumber, int size) {
         long timescale = 90000;
+        MutableBoolean hasInit = new MutableBoolean(false);
 
         MP4Segment segment = createMP4Segment(timescale, startTime, sequenceNumber);
         ByteBuffer init = FramePool.acquire(2048);
-        ByteBuffer data = FramePool.acquire(inputBuf.capacity());
+        ByteBuffer data = FramePool.acquire(size);
 
         frames = frames.doOnNext(frame -> {
             if (!hasInit.value) {
                 hasInit.value = true;
+
+                console.log(frame.isVideo() ? "video" : "audio", "first pts", frame.pts, "dts", frame.dts);
+
                 FileTypeBox ftyp = createFileTypeBox("iso5", 1, asList("avc1", "iso5", "dash"));
-                MovieBox moov = dashinit(frame);
+                MovieBox moov = frame.isVideo() ? dashinitVideo(frame) : dashinitAudio(frame);
                 ftyp.write(init);
                 moov.write(init);
                 init.flip();
+
+                segment.mimeType = frame.isVideo() ? "video/mp4" : "audio/mp4";
+                segment.codecs = frame.isVideo() ? "avc1.4d4028" : "mp4a.40.2";   // TODO
             }
         });
 
-        ByteBuffer _mdat = FramePool.acquire(inputBuf.capacity());
+        ByteBuffer _mdat = FramePool.acquire(size);
 
         Rx.Observable<MP4Segment> m4srx = frames.reduce((m4s, frame) -> {
             int compOffset = frame.dts != null ? (int) (frame.pts - frame.dts) : 0;
@@ -70,7 +80,7 @@ public class M4sWorker {
             m4s.sidx.references[0].subsegment_duration += frame.duration;
             m4s.trackRun.sampleCompositionOffset.add(compOffset);
             m4s.trackRun.sampleDuration.add((int) frame.duration);
-            int flags = frame.isIFrame() ? 0x02000000 : 0x01010000;
+            int flags = (frame.isIFrame() || frame.isAudio()) ? 0x02000000 : 0x01010000;
             m4s.trackRun.sampleFlags.add(flags);
             m4s.trackRun.sampleSize.add(frame.dataSize);
             _mdat.putBuf(frame.data());

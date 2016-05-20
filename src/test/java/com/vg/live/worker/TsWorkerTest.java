@@ -3,7 +3,7 @@ package com.vg.live.worker;
 import static com.vg.live.video.MP4Segment.createMP4Segment;
 import static com.vg.live.video.TSPkt.PAT_PID;
 import static com.vg.util.ADTSHeader.decoderSpecific;
-import static com.vg.util.DashUtil.dashinit;
+import static com.vg.util.DashUtil.dashinitVideo;
 import static js.util.Arrays.asList;
 import static org.jcodec.codecs.h264.mp4.AvcCBox.createAvcCBox;
 import static org.jcodec.codecs.mpeg4.mp4.EsdsBox.createEsdsBox;
@@ -139,7 +139,7 @@ public class TsWorkerTest {
               .doOnNext(frame -> {
                   if (!hasInit.value) {
                       hasInit.value = true;
-                      MovieBox moov = dashinit(frame);
+                      MovieBox moov = dashinitVideo(frame);
                       FileTypeBox ftyp = createFileTypeBox("iso5", 1, asList("avc1", "iso5", "dash"));
                       ByteBuffer _buf = FramePool.acquire(2048);
                       ftyp.write(_buf);
