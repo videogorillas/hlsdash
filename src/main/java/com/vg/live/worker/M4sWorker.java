@@ -1,11 +1,14 @@
 package com.vg.live.worker;
 
 import com.vg.js.bridge.Rx;
+import com.vg.js.bridge.Rx.GroupedObservable;
+import com.vg.js.bridge.Rx.Observable;
 import com.vg.live.video.AVFrame;
 import com.vg.live.video.MP4Segment;
 import com.vg.live.video.TSPkt;
 import com.vg.live.video.TSStream;
 import com.vg.util.MutableBoolean;
+import com.vg.util.MutableLong;
 import js.nio.ByteBuffer;
 import org.jcodec.containers.mp4.boxes.FileTypeBox;
 import org.jcodec.containers.mp4.boxes.Header;
@@ -20,63 +23,63 @@ import static org.jcodec.containers.mp4.boxes.FileTypeBox.createFileTypeBox;
 import static org.stjs.javascript.Global.console;
 
 public class M4sWorker {
-    public static Rx.Observable<AVFrame> frames(ByteBuffer bufIn) {
+    public static Observable<AVFrame> frames(ByteBuffer bufIn) {
         TSStream stream = new TSStream();
-        Rx.Observable<TSPkt> tsPackets = TsWorker.tsPackets(Rx.Observable.just(bufIn), 0);
-        tsPackets = tsPackets.doOnNext(pkt -> stream.parsePSI(pkt));
-        tsPackets = tsPackets.filter(pkt -> TSPkt.isElementaryStreamPID(pkt.pid) && !stream.isPMT(pkt.pid));
-
-        Rx.Observable<AVFrame> frames = TsWorker.frameStream(tsPackets);
-
-        frames = frames.doOnNext(f -> {
-            if (stream.startPts == -1) {
-                stream.startPts = f.pts;
-            }
-            f.pts = f.pts - stream.startPts;
-            if (f.dts != null && f.dts != -1) {
-                f.dts = f.dts - stream.startPts;
-            }
-        });
-        return frames;
+        Observable<TSPkt> tsPackets = TsWorker.tsPackets(Observable.just(bufIn), 0)
+                .doOnNext(stream::parsePSI)
+                .filter(pkt -> TSPkt.isElementaryStreamPID(pkt.pid) && !stream.isPMT(pkt.pid));
+        return TsWorker.frameStream(tsPackets);
     }
 
-    public static Rx.Observable<MP4Segment> m4s(ByteBuffer inputBuf, long startTime, int sequenceNumber) {
-        return frames(inputBuf)
+    public static Observable<MP4Segment> framesToM4sDemux(Observable<AVFrame> frames, int size, int sequenceNumber,
+                                                          long videoStartTv, long audioStartTv) {
+        return frames
                 .groupBy(AVFrame::isVideo)
-                .flatMap(frames1 -> framesToM4s(frames1, startTime, sequenceNumber, inputBuf.capacity()));
+                .flatMap(frames1 ->
+                        framesToM4s(frames1, size, sequenceNumber, frames1.key ? videoStartTv : audioStartTv));
     }
 
-    private static Rx.Observable<MP4Segment> framesToM4s(Rx.Observable<AVFrame> frames, long startTime,
-                                                         int sequenceNumber, int size) {
+    public static Observable<MP4Segment> framesToM4s(Observable<AVFrame> frames, int size, int sequenceNumber,
+                                                     long startPts) {
         long timescale = 90000;
         MutableBoolean hasInit = new MutableBoolean(false);
+        MutableLong originalStartPts = new MutableLong(-1);
 
-        MP4Segment segment = createMP4Segment(timescale, startTime, sequenceNumber);
+        MP4Segment segment = createMP4Segment(timescale, startPts, sequenceNumber);
         ByteBuffer init = FramePool.acquire(2048);
         ByteBuffer data = FramePool.acquire(size);
 
-        frames = frames.doOnNext(frame -> {
-            if (!hasInit.value) {
-                hasInit.value = true;
+        frames = frames
+                .doOnNext(frame -> {
+                    if (!hasInit.value) {
+                        hasInit.value = true;
 
-                console.log(frame.isVideo() ? "video" : "audio", "first pts", frame.pts, "dts", frame.dts);
+                        console.log(frame.isVideo() ? "video" : "audio", "first pts", frame.pts, "dts", frame.dts);
 
-                FileTypeBox ftyp = createFileTypeBox("iso5", 1, asList("avc1", "iso5", "dash"));
-                MovieBox moov = frame.isVideo() ? dashinitVideo(frame) : dashinitAudio(frame);
-                ftyp.write(init);
-                moov.write(init);
-                init.flip();
+                        FileTypeBox ftyp = createFileTypeBox("iso5", 1, asList("avc1", "iso5", "dash"));
+                        MovieBox moov = frame.isVideo() ? dashinitVideo(frame) : dashinitAudio(frame);
+                        ftyp.write(init);
+                        moov.write(init);
+                        init.flip();
 
-                segment.mimeType = frame.isVideo() ? "video/mp4" : "audio/mp4";
-                segment.codecs = frame.isVideo() ? "avc1.4d4028" : "mp4a.40.2";   // TODO
-            }
-        });
+                        segment.mimeType = frame.isVideo() ? "video/mp4" : "audio/mp4";
+                        segment.codecs = frame.isVideo() ? "avc1.4d4028" : "mp4a.40.2";   // TODO
+
+                        originalStartPts.value = frame.pts;
+                    }
+                })
+                .doOnNext(f -> {
+                    f.pts = f.pts - originalStartPts.value + startPts;
+                    if (f.dts != null && f.dts != -1) {
+                        f.dts = f.dts - originalStartPts.value + startPts;
+                    }
+                });
 
         ByteBuffer _mdat = FramePool.acquire(size);
 
-        Rx.Observable<MP4Segment> m4srx = frames.reduce((m4s, frame) -> {
+        Observable<MP4Segment> m4srx = frames.reduce((m4s, frame) -> {
             int compOffset = frame.dts != null ? (int) (frame.pts - frame.dts) : 0;
-            //            console.log(frame.pts, frame.dts, compOffset);
+                        if (frame.isVideo()) console.log(frame.pts, frame.dts, compOffset, frame.isIFrame() ? "I" : "");
             m4s.sidx.references[0].subsegment_duration += frame.duration;
             m4s.trackRun.sampleCompositionOffset.add(compOffset);
             m4s.trackRun.sampleDuration.add((int) frame.duration);
@@ -88,7 +91,7 @@ public class M4sWorker {
             return m4s;
         }, segment);
 
-        Rx.Observable<MP4Segment> outputrx = m4srx.map(m4s -> {
+        Observable<MP4Segment> outputrx = m4srx.map(m4s -> {
             m4s.trun = MP4Segment.createTrunBox(m4s.trackRun);
             m4s.moof.getTracks()[0].add(m4s.trun);
 

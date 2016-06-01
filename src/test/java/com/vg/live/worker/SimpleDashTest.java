@@ -12,7 +12,6 @@ import org.stjs.javascript.Array;
 import org.stjs.javascript.Global;
 import org.stjs.javascript.dom.Anchor;
 import org.stjs.javascript.dom.DOMEvent;
-import org.stjs.javascript.dom.Element;
 import org.stjs.javascript.dom.Video;
 import org.stjs.javascript.dom.media.MediaSource;
 import org.stjs.javascript.dom.media.SourceBuffer;
@@ -57,9 +56,11 @@ public class SimpleDashTest {
                 .flatMap(SimpleAjax::getArrayBuffer)
                 .flatMap(ts -> {
                     ByteBuffer inputBuf = ByteBuffer.wrap(new Int8Array(ts));
-                    Observable<MP4Segment> m4s = M4sWorker.m4s(inputBuf, duration.longValue(), (int) mseq.longValue() + 1);
 
-                    if (mseq.longValue() == 0) {
+                    Observable<MP4Segment> m4s = M4sWorker.framesToM4s(M4sWorker.frames(inputBuf), inputBuf.capacity(),
+                            (int) mseq.value + 1, duration.value);
+
+                    if (mseq.value == 0) {
                         return m4s.doOnNext(m -> {
                             ByteBuffer init = m.init;
                             console.log("init", init);
@@ -88,7 +89,7 @@ public class SimpleDashTest {
                         bufferReady = Rx.Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND).take(1).map(ee -> true);
                     }
                     return bufferReady.doOnNext(e -> {
-                        console.log("add data", mseq.longValue(), duration.longValue());
+                        console.log("add data", mseq.value, duration.value);
                         videoBuffer.appendBuffer(dataView(m4s.data));
 
                         for (int i = 0; i < m4s.trun.getSampleCount(); i++) {
@@ -98,8 +99,8 @@ public class SimpleDashTest {
                 })
                 .doOnNext(b -> {
                     mseq.add(1);
-                    if (mseq.longValue() < urls.$length()) {
-                        urlrx.onNext(urls.$get(mseq.longValue()));
+                    if (mseq.value < urls.$length()) {
+                        urlrx.onNext(urls.$get(mseq.value));
                     }
                 })
                 .subscribe();
@@ -150,7 +151,7 @@ public class SimpleDashTest {
 
         Observable<DOMEvent> updateEndRx = downloadTs.flatMap(ts -> {
             ByteBuffer inputBuf = ByteBuffer.wrap(new Int8Array(ts));
-            Observable<MP4Segment> m4s = M4sWorker.m4s(inputBuf, 0, 1);
+            Observable<MP4Segment> m4s = M4sWorker.framesToM4s(M4sWorker.frames(inputBuf), inputBuf.capacity(), 1, 0);
             m4s = m4s.doOnNext(m -> {
                 ByteBuffer init = m.init;
                 console.log("init", init);
@@ -201,7 +202,7 @@ public class SimpleDashTest {
                          return Rx.Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND);
                      })
                      .flatMap(e -> {
-                         long mseq = _mseq.longValue();
+                         long mseq = _mseq.value;
                          if (mseq < 2) {
                              _mseq.add(1);
                              String url = "tmp/hlsjs/chunk.m4s";
@@ -251,7 +252,7 @@ public class SimpleDashTest {
                          return Rx.Observable.fromEvent(videoBuffer, BUFFER_UPDATEEND);
                      })
                      .flatMap(e -> {
-                         long mseq = _mseq.longValue();
+                         long mseq = _mseq.value;
                          if (mseq < 3) {
                              _mseq.add(1);
                              String url = "tmp/dash/chunk-stream0-" + zeroPad((int) mseq, 5) + ".m4s";

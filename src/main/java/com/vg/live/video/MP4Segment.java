@@ -34,6 +34,8 @@ public class MP4Segment {
     public ByteBuffer init;
     public ByteBuffer data;
 
+    public long startTime;
+
     public MP4Segment() {
         this.trackRun = new TrackRun();
     }
@@ -74,6 +76,8 @@ public class MP4Segment {
         m4s.styp = styp;
         m4s.moof = moof;
         m4s.sidx = sidx;
+        m4s.startTime = startTime;
+
         return m4s;
     }
 

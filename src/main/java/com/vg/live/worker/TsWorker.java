@@ -47,7 +47,7 @@ public class TsWorker {
                 TSPkt.parsePacket(pkt, ts);
 //                System.out.println(pkt.toString());
                 pkt.dataOffset = pos;
-                pkt.streamOffset = streamPosition.longValue();
+                pkt.streamOffset = streamPosition.value;
                 streamPosition.add(188);
                 list.add(pkt);
             }
@@ -227,8 +227,15 @@ public class TsWorker {
             if (list.$length() == 2) {
                 PESPacket f1 = list.$get(0);
                 PESPacket f2 = list.$get(1);
-                f1.duration = Math.max(0, f2.pts - f1.pts);
+
+                long t1 = f1.dts != -1 ? f1.dts : f1.pts;
+                long t2 = f2.dts != -1 ? f2.dts : f2.pts;
+
+//                f1.duration = 3003;
+//                f2.duration = 3003;
+                f1.duration = t2 - t1;
                 f2.duration = f1.duration;
+
             }
             return list.$get(0);
         });
